@@ -429,7 +429,16 @@ _InitWMACSetting(
 
 	/*	rcr = AAP | APM | AM |AB  |ADD3|APWRMGT| APP_ICV | APP_MIC |APP_FCS|ADF |ACF|AMF|HTC_LOC_CTRL|APP_PHYSTS; */
 	/*	rcr = AAP | APM | AM | AB | ADD3 | APWRMGT | APP_ICV | APP_MIC | ADF | ACF | AMF | HTC_LOC_CTRL | APP_PHYSTS; */
-	rcr = RCR_APM | RCR_AM | RCR_AB | RCR_CBSSID_DATA | RCR_CBSSID_BCN | RCR_APP_ICV | RCR_AMF | RCR_HTC_LOC_CTRL | RCR_APP_MIC | RCR_APP_PHYST_RXFF | RCR_APPFCS;
+	rcr = (
+		0
+		#ifdef CONFIG_RX_PACKET_APPEND_FCS
+		| RCR_APPFCS
+		#endif
+		| RCR_APM | RCR_AM | RCR_AB | RCR_CBSSID_DATA
+		| RCR_CBSSID_BCN | RCR_APP_ICV | RCR_AMF | RCR_HTC_LOC_CTRL
+		| RCR_APP_MIC | RCR_APP_PHYST_RXFF
+	);
+
 	rtw_hal_set_hwreg(Adapter, HW_VAR_RCR, (u8 *)&rcr);
 
 	/* Accept all data frames */
@@ -468,10 +477,6 @@ _InitAdaptiveCtrl(
 	/* CF-END Threshold */
 	/*m_spIoBase->rtw_write8(REG_CFEND_TH, 0x1); */
 
-	/* SIFS (used in NAV) */
-	value16 = _SPEC_SIFS_CCK(0x10) | _SPEC_SIFS_OFDM(0x10);
-	rtw_write16(Adapter, REG_SPEC_SIFS, value16);
-
 	/* Retry Limit */
 	value16 = BIT_LRL(RL_VAL_STA) | BIT_SRL(RL_VAL_STA);
 	rtw_write16(Adapter, REG_RETRY_LIMIT, value16);
@@ -483,16 +488,6 @@ _InitEDCA(
 		PADAPTER Adapter
 )
 {
-	/* Set Spec SIFS (used in NAV) */
-	rtw_write16(Adapter, REG_SPEC_SIFS, 0x100a);
-	rtw_write16(Adapter, REG_MAC_SPEC_SIFS, 0x100a);
-
-	/* Set SIFS for CCK */
-	rtw_write16(Adapter, REG_SIFS_CTX, 0x100a);
-
-	/* Set SIFS for OFDM */
-	rtw_write16(Adapter, REG_SIFS_TRX, 0x100a);
-
 	/* TXOP */
 	rtw_write32(Adapter, REG_EDCA_BE_PARAM, 0x005EA42B);
 	rtw_write32(Adapter, REG_EDCA_BK_PARAM, 0x0000A44F);
@@ -971,6 +966,13 @@ u32 rtl8188fu_hal_init(PADAPTER padapter)
 
 	HAL_INIT_PROFILE_TAG(HAL_INIT_STAGES_BEGIN);
 
+#ifdef CONFIG_FWLPS_IN_IPS
+	if (rtw_is_fw_ips_mode(padapter) == _TRUE) {
+		if (rtw_fw_ips_init(padapter) == _SUCCESS)
+			goto exit;
+	}
+#endif
+
 	/*	if (rtw_is_surprise_removed(Adapter)) */
 	/*		return RT_STATUS_FAILURE; */
 
@@ -979,7 +981,6 @@ u32 rtl8188fu_hal_init(PADAPTER padapter)
 	rtw_write8(padapter, REG_USB_ACCESS_TIMEOUT, 0x80);
 #undef REG_USB_ACCESS_TIMEOUT
 #endif
-
 
 	HAL_INIT_PROFILE_TAG(HAL_INIT_STAGES_INIT_PW_ON);
 	status = rtw_hal_power_on(padapter);
@@ -1673,6 +1674,13 @@ u32 rtl8188fu_hal_deinit(PADAPTER Adapter)
 
 	RTW_INFO("==> %s\n", __func__);
 
+#ifdef CONFIG_FWLPS_IN_IPS
+	if (rtw_is_fw_ips_mode(Adapter) == _TRUE) {
+		if (rtw_fw_ips_deinit(Adapter) == _SUCCESS)
+			goto exit;
+	}
+#endif
+
 	rtw_write16(Adapter, REG_GPIO_MUXCFG, rtw_read16(Adapter, REG_GPIO_MUXCFG) & (~BIT12));
 
 	rtw_write32(Adapter, REG_HISR0_8188F, 0xFFFFFFFF);
@@ -1707,6 +1715,10 @@ u32 rtl8188fu_hal_deinit(PADAPTER Adapter)
 		}
 		pHalData->bMacPwrCtrlOn = _FALSE;
 	}
+
+#ifdef CONFIG_FWLPS_IN_IPS
+exit:
+#endif
 	return _SUCCESS;
 }
 
@@ -1726,6 +1738,17 @@ unsigned int rtl8188fu_inirp_init(PADAPTER Adapter)
 	HAL_DATA_TYPE	*pHalData = GET_HAL_DATA(Adapter);
 #endif /*CONFIG_USB_INTERRUPT_IN_PIPE */
 
+#ifdef CONFIG_FWLPS_IN_IPS
+	/* Do not sumbit urb repeat */
+	struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(Adapter);
+
+	if (rtw_is_fw_ips_mode(Adapter) == _TRUE) {
+		if (pwrctl->bips_processing == _TRUE) {
+			status = _SUCCESS;
+			goto exit;
+		}
+	}
+#endif /* CONFIG_FWLPS_IN_IPS */
 
 	_read_port = pintfhdl->io_ops._read_port;
 
@@ -1771,8 +1794,20 @@ unsigned int rtl8188fu_inirp_deinit(PADAPTER Adapter)
 	u32(*_read_interrupt)(struct intf_hdl *pintfhdl, u32 addr);
 	HAL_DATA_TYPE	*pHalData = GET_HAL_DATA(Adapter);
 #endif /*CONFIG_USB_INTERRUPT_IN_PIPE */
+	struct recv_priv	*precvpriv = &Adapter->recvpriv;
+	_pkt			*pskb;
 
 	rtw_read_port_cancel(Adapter);
+
+	while (NULL != (pskb = skb_dequeue(&precvpriv->rx_skb_queue))) {
+		skb_reset_tail_pointer(pskb);
+		pskb->len = 0;
+		skb_queue_tail(&precvpriv->free_recv_skb_queue, pskb);
+	}
+
+	/* Clean pending recv buf */
+	while (rtw_dequeue_recvbuf(&precvpriv->recv_buf_pending_queue));
+
 #ifdef CONFIG_USB_INTERRUPT_IN_PIPE
 	pHalData->IntrMask[0] = rtw_read32(Adapter, REG_USB_HIMR);
 	RTW_INFO("%s pHalData->IntrMask = 0x%04x\n", __func__, pHalData->IntrMask[0]);
@@ -2090,11 +2125,11 @@ u8 SetHwReg8188FU(PADAPTER Adapter, u8 variable, u8 *val)
 		{
 			u8	ps_state = *((u8 *)val);
 
-			/*rpwm value only use BIT0(clock bit) ,BIT6(Ack bit), and BIT7(Toggle bit) for 88e.
-			BIT0 value - 1: 32k, 0:40MHz.
-			BIT6 value - 1: report cpwm value after success set, 0:do not report.
-			BIT7 value - Toggle bit change.
-			modify by Thomas. 2012/4/2.*/
+			/* rpwm value only use BIT0(clock bit) ,BIT6(Ack bit), and BIT7(Toggle bit) for 88e. */
+			/* BIT0 value - 1: 32k, 0:40MHz. */
+			/* BIT6 value - 1: report cpwm value after success set, 0:do not report. */
+			/* BIT7 value - Toggle bit change. */
+
 			ps_state = ps_state & 0xC1;
 			/* RTW_INFO("##### Change RPWM value to = %x for switch clk #####\n", ps_state); */
 			rtw_write8(Adapter, REG_USB_HRPWM, ps_state);
@@ -2105,7 +2140,6 @@ u8 SetHwReg8188FU(PADAPTER Adapter, u8 variable, u8 *val)
 	case HW_VAR_TRIGGER_GPIO_0:
 		rtl8188fu_trigger_gpio_0(Adapter);
 		break;
-
 	default:
 		ret = SetHwReg8188F(Adapter, variable, val);
 		break;
@@ -2124,12 +2158,14 @@ void GetHwReg8188FU(PADAPTER Adapter, u8 variable, u8 *val)
 
 
 	switch (variable) {
-	case HW_VAR_CPWM:
 #ifdef CONFIG_LPS_LCLK
+	case HW_VAR_CPWM:
 		*val = rtw_read8(Adapter, REG_USB_HCPWM);
-		/* RTW_INFO("##### REG_USB_HCPWM(0x%02x) = 0x%02x #####\n", REG_USB_HCPWM, *val); */
-#endif /* CONFIG_LPS_LCLK */
 		break;
+	case HW_VAR_RPWM_TOG:
+		*val = rtw_read8(Adapter, REG_USB_HRPWM) & PS_TOGGLE;
+		break;
+#endif /* CONFIG_LPS_LCLK */
 	default:
 		GetHwReg8188F(Adapter, variable, val);
 		break;
@@ -2252,6 +2288,9 @@ void rtl8188fu_set_hal_ops(_adapter *padapter)
 
 	pHalFunc->hal_xmit = &rtl8188fu_hal_xmit;
 	pHalFunc->mgnt_xmit = &rtl8188fu_mgnt_xmit;
+#ifdef CONFIG_RTW_MGMT_QUEUE
+	pHalFunc->hal_mgmt_xmitframe_enqueue = &rtl8188fu_hal_mgmt_xmitframe_enqueue;
+#endif
 	pHalFunc->hal_xmitframe_enqueue = &rtl8188fu_hal_xmitframe_enqueue;
 
 #ifdef CONFIG_HOSTAPD_MLME

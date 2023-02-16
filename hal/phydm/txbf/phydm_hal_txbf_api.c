@@ -18,7 +18,8 @@
 
 #if (defined(CONFIG_BB_TXBF_API))
 #if (RTL8822B_SUPPORT == 1 || RTL8192F_SUPPORT == 1 || RTL8812F_SUPPORT == 1 ||\
-	RTL8822C_SUPPORT == 1 || RTL8198F_SUPPORT == 1 || RTL8814B_SUPPORT == 1)
+	RTL8822C_SUPPORT == 1 || RTL8198F_SUPPORT == 1 || RTL8814B_SUPPORT == 1 ||\
+	RTL8822E_SUPPORT == 1)
 /*@Add by YuChen for 8822B MU-MIMO API*/
 
 /*this function is only used for BFer*/
@@ -51,11 +52,12 @@ u8 phydm_get_beamforming_sounding_info(void *dm_void, u16 *throughput,
 			     tx_rate[idx] <= ODM_RATEVHTSS3MCS9))
 				snddecision = snddecision & ~(1 << idx);
 		} else if (dm->support_ic_type & (ODM_RTL8822B | ODM_RTL8822C |
-			   ODM_RTL8812 | ODM_RTL8192F)) {
+			   ODM_RTL8812 | ODM_RTL8192F | ODM_RTL8822E)) {
 			if ((tx_rate[idx] >= ODM_RATEVHTSS2MCS7 &&
 			     tx_rate[idx] <= ODM_RATEVHTSS2MCS9))
 				snddecision = snddecision & ~(1 << idx);
-		} else if (dm->support_ic_type & (ODM_RTL8814B)) {
+		} else if (dm->support_ic_type &
+			   (ODM_RTL8814B | ODM_RTL8814C)) {
 			if ((tx_rate[idx] >= ODM_RATEVHTSS4MCS7 &&
 			     tx_rate[idx] <= ODM_RATEVHTSS4MCS9))
 				snddecision = snddecision & ~(1 << idx);
@@ -121,7 +123,6 @@ u8 beamforming_get_htndp_tx_rate(void *dm_void, u8 bfer_str_num)
 	if (dm->support_ic_type & ODM_RTL8814A)
 		nr_index = tx_bf_nr(hal_txbf_8814a_get_ntx(dm), bfer_str_num);
 	else
-#endif
 		nr_index = tx_bf_nr(1, bfer_str_num);
 
 	switch (nr_index) {
@@ -141,6 +142,9 @@ u8 beamforming_get_htndp_tx_rate(void *dm_void, u8 bfer_str_num)
 		ndp_tx_rate = ODM_MGN_MCS8;
 		break;
 	}
+#else
+	ndp_tx_rate = ODM_MGN_MCS8;
+#endif
 
 	return ndp_tx_rate;
 }
@@ -155,7 +159,6 @@ u8 beamforming_get_vht_ndp_tx_rate(void *dm_void, u8 bfer_str_num)
 	if (dm->support_ic_type & ODM_RTL8814A)
 		nr_index = tx_bf_nr(hal_txbf_8814a_get_ntx(dm), bfer_str_num);
 	else
-#endif
 		nr_index = tx_bf_nr(1, bfer_str_num);
 
 	switch (nr_index) {
@@ -175,6 +178,9 @@ u8 beamforming_get_vht_ndp_tx_rate(void *dm_void, u8 bfer_str_num)
 		ndp_tx_rate = ODM_MGN_VHT2SS_MCS0;
 		break;
 	}
+#else
+	ndp_tx_rate = ODM_MGN_VHT2SS_MCS0;
+#endif
 
 	return ndp_tx_rate;
 }
@@ -218,6 +224,67 @@ void phydm_txbf_rfmode(void *dm_void, u8 su_bfee_cnt, u8 mu_bfee_cnt)
 			/*Set Table data*/
 			odm_set_rf_reg(dm, RF_PATH_B, RF_0x3f, 0xfffff,
 				       0x99230);
+			/*RF mode table write disable*/
+			odm_set_rf_reg(dm, RF_PATH_B, RF_0xef, BIT(19), 0x0);
+		}
+
+		/*@if Nsts > Nc, don't apply V matrix*/
+		odm_set_bb_reg(dm, R_0x1e24, BIT(11), 1);
+
+		if (su_bfee_cnt > 0 || mu_bfee_cnt > 0) {
+			/*@enable BB TxBF ant mapping register*/
+			odm_set_bb_reg(dm, R_0x1e24, BIT(28) | BIT29, 0x2);
+			odm_set_bb_reg(dm, R_0x1e24, BIT(30), 1);
+
+			/* logic mapping */
+			/* TX BF logic map and TX path en for Nsts = 1~2 */
+			odm_set_bb_reg(dm, R_0x820, 0xff, 0x33);
+			odm_set_bb_reg(dm, R_0x1e2c, 0xffff, 0x404);
+			odm_set_bb_reg(dm, R_0x820, 0xffff0000, 0x33);
+			odm_set_bb_reg(dm, R_0x1e30, 0xffff, 0x404);
+		} else {
+			/*@Disable BB TxBF ant mapping register*/
+			odm_set_bb_reg(dm, R_0x1e24, BIT(28) | BIT29, 0x0);
+			odm_set_bb_reg(dm, R_0x1e24, BIT(31), 0);
+			/*@1SS~2ss A, AB*/
+			odm_set_bb_reg(dm, R_0x820, 0xff, 0x31);
+			odm_set_bb_reg(dm, R_0x1e2c, 0xffff, 0x400);
+		}
+	}
+#endif
+#if (RTL8822E_SUPPORT)
+	if (dm->support_ic_type == ODM_RTL8822E) {
+		if (su_bfee_cnt > 0 || mu_bfee_cnt > 0) {
+			/*Path A ==================*/
+			/*RF mode table write enable*/
+			odm_set_rf_reg(dm, RF_PATH_A, RF_0xef, BIT(19), 0x1);
+			/*Select RX mode*/
+			odm_set_rf_reg(dm, RF_PATH_A, RF_0x33, 0xF, 0x3);
+			/*Set Table data*/
+			odm_set_rf_reg(dm, RF_PATH_A, RF_0x3e, 0xF, 0x4);
+			/*Set Table data*/
+			odm_set_rf_reg(dm, RF_PATH_A, RF_0x3f, 0xfffff,
+				       0xc1aff);
+			/*RF mode table write disable*/
+			odm_set_rf_reg(dm, RF_PATH_A, RF_0xef, BIT(19), 0x0);
+
+			/*Path B ==================*/
+			/*RF mode table write enable*/
+			odm_set_rf_reg(dm, RF_PATH_B, RF_0xef, BIT(19), 0x1);
+			/*Select RX mode*/
+			odm_set_rf_reg(dm, RF_PATH_B, RF_0x33, 0xF, 0x3);
+			/*Set Table data*/
+			odm_set_rf_reg(dm, RF_PATH_B, RF_0x3e, 0xF, 0x1);
+			/*Set Table data*/
+			odm_set_rf_reg(dm, RF_PATH_B, RF_0x3f, 0xfffff,
+				       0x306bf);
+			/*Select Standby mode*/
+			//odm_set_rf_reg(dm, RF_PATH_B, RF_0x33, 0xF, 1);
+			/*Set Table data*/
+			//odm_set_rf_reg(dm, RF_PATH_B, RF_0x3e, 0xF, 0x1);
+			/*Set Table data TXIQG+RXIQG turn on*/
+			//odm_set_rf_reg(dm, RF_PATH_B, RF_0x3f, 0xfffff,
+			//	       0x300a0);
 			/*RF mode table write disable*/
 			odm_set_rf_reg(dm, RF_PATH_B, RF_0xef, BIT(19), 0x0);
 		}
@@ -299,7 +366,7 @@ void phydm_txbf_rfmode(void *dm_void, u8 su_bfee_cnt, u8 mu_bfee_cnt)
 	}
 #endif
 #if (RTL8814B_SUPPORT)
-	if (dm->support_ic_type == ODM_RTL8814B) {
+	if (dm->support_ic_type & (ODM_RTL8814B | ODM_RTL8814C)) {
 		if (su_bfee_cnt > 0 || mu_bfee_cnt > 0) {
 			for (i = RF_PATH_A; i <= RF_PATH_D; i++) {
 				/*RF mode table write enable*/
@@ -338,16 +405,16 @@ void phydm_txbf_rfmode(void *dm_void, u8 su_bfee_cnt, u8 mu_bfee_cnt)
 
 			/* logic mapping */
 			/* TX BF logic map and TX path en for Nsts = 1~4 */
-			odm_set_bb_reg(dm, R_0x820, 0xffff0000, 0xffff);
+			//odm_set_bb_reg(dm, R_0x820, 0xffff0000, 0xffff);
 			/*verification path-AC*/
-			odm_set_bb_reg(dm, R_0x1e30, 0xffffffff, 0xe4e4e4e4);
+			//odm_set_bb_reg(dm, R_0x1e30, 0xffffffff, 0xe4e4e4e4);
 		} else {
 			/*@Disable BB TxBF ant mapping register*/
 			odm_set_bb_reg(dm, R_0x1e24, BIT(28) | BIT29, 0x0);
 			odm_set_bb_reg(dm, R_0x1e24, BIT(31), 0);
 			/*@1SS~4ss A, AB, ABC, ABCD*/
-			odm_set_bb_reg(dm, R_0x820, 0xffff, 0xf731);
-			odm_set_bb_reg(dm, R_0x1e2c, 0xffffffff, 0xe4240400);
+			//odm_set_bb_reg(dm, R_0x820, 0xffff, 0xf731);
+			//odm_set_bb_reg(dm, R_0x1e2c, 0xffffffff, 0xe4240400);
 		}
 	}
 #endif
@@ -574,13 +641,6 @@ void phydm_mu_rsoml_decision(void *dm_void)
 	phydm_mu_rsoml_reset(dm);
 }
 
-void phydm_txbf_avoid_hang(void *dm_void)
-{
-	struct dm_struct *dm = (struct dm_struct *)dm_void;
-
-	/* avoid CCK CCA hang when the BF mode */
-	odm_set_bb_reg(dm, R_0x1e6c, 0x100000, 0x1);
-}
 
 #if (RTL8814B_SUPPORT == 1)
 void phydm_txbf_80p80_rfmode(void *dm_void, u8 su_bfee_cnt, u8 mu_bfee_cnt)
@@ -668,6 +728,21 @@ void phydm_txbf_80p80_rfmode(void *dm_void, u8 su_bfee_cnt, u8 mu_bfee_cnt)
 #endif
 #endif /*PHYSTS_3RD_TYPE_IC*/
 
+void phydm_txbf_avoid_hang(void *dm_void)
+{
+	struct dm_struct *dm = (struct dm_struct *)dm_void;
+
+	/* avoid CCK CCA hang when the BF mode */
+#ifdef PHYDM_IC_JGR3_SERIES_SUPPORT
+	odm_set_bb_reg(dm, R_0x1e6c, 0x100000, 0x1);
+#endif
+
+	/* avoid CCK CCA hang when the BFee mode for 92F */
+#if (RTL8192F_SUPPORT == 1)
+	odm_set_bb_reg(dm, R_0xa70, 0xffff0000, 0x80ff);
+#endif
+}
+
 void phydm_bf_debug(void *dm_void, char input[][16], u32 *_used, char *output,
 		    u32 *_out_len)
 {
@@ -686,8 +761,7 @@ void phydm_bf_debug(void *dm_void, char input[][16], u32 *_used, char *output,
 		return;
 	}
 	for (i = 0; i < 3; i++) {
-		if (input[i + 1])
-			PHYDM_SSCANF(input[i + 1], DCMD_DECIMAL, &var1[i]);
+		PHYDM_SSCANF(input[i + 1], DCMD_DECIMAL, &var1[i]);
 	}
 	if (var1[0] == 0) {
 		#if (DM_ODM_SUPPORT_TYPE & (ODM_WIN | ODM_CE))

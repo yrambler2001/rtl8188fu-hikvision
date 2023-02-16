@@ -16,7 +16,14 @@
 #ifndef __WIFI_REGD_H__
 #define __WIFI_REGD_H__
 
-void rtw_regd_apply_flags(struct wiphy *wiphy);
+void rtw_chset_hook_os_channels(struct rtw_chset *chset, void *os_ref);
+void rtw_regd_change_complete_sync(struct wiphy *wiphy, struct get_chplan_resp *chplan, bool rtnl_lock_needed);
+int rtw_regd_change_complete_async(struct wiphy *wiphy, struct get_chplan_resp *chplan);
+#ifdef CONFIG_REGD_SRC_FROM_OS
+void rtw_chset_apply_from_os(struct rtw_chset *chset, u8 d_flags);
+s16 rtw_os_get_total_txpwr_regd_lmt_mbm(_adapter *adapter, enum band_type band, u8 cch, enum channel_width bw);
+#endif
 int rtw_regd_init(struct wiphy *wiphy);
+void rtw_regd_deinit(struct wiphy *wiphy);
 
 #endif /* __WIFI_REGD_H__ */

@@ -26,8 +26,8 @@
 #ifndef __PHYDM_PMAC_TX_SETTING_H__
 #define __PHYDM_PMAC_TX_SETTING_H__
 
-/*2019.08.02 Modify pmac_tx echo cmd to prevent from hang*/
-#define PMAC_TX_SETTING_VERSION "2.0"
+/*2020.03.16 Fix TxInfo content in B mode*/
+#define PMAC_TX_SETTING_VERSION "2.1"
 
 /* 1 ============================================================
  * 1  Definition
@@ -49,10 +49,12 @@ struct phydm_pmac_info {
 	u8 m_stbc; /* bSTBC + 1 for WIN/CE, bSTBC for others*/
 	u16 packet_period;
 	u32 packet_count;
+	u32 packet_length;
 	u8 packet_pattern;
 	u16 sfd;
 	u8 signal_field;
 	u8 service_field;
+	u8 service_field_bit2:1;
 	u16 length;
 	u8 crc16[2];
 	u8 lsig[3];
@@ -103,6 +105,8 @@ void phydm_set_pmac_tx(void *dm_void, struct phydm_pmac_info *tx_info,
 		       enum rf_path mpt_rf_path);
 
 void phydm_set_tmac_tx(void *dm_void);
+
+void phydm_set_cck_disable_cca_jgr3(void *dm_void, boolean value);
 
 void phydm_pmac_tx_dbg(void *dm_void, char input[][16], u32 *_used,
 		       char *output, u32 *_out_len);

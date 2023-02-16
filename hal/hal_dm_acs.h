@@ -80,7 +80,7 @@ struct auto_chan_sel {
 	bool triggered;
 	u8 clm_ratio[MAX_CHANNEL_NUM];
 	u8 nhm_ratio[MAX_CHANNEL_NUM];
-	s8 env_mntr_rpt[MAX_CHANNEL_NUM];
+	s8 env_mntr_rpt[MAX_CHANNEL_NUM]; /*unit:dbm*/
 	#if (RTK_ACS_VERSION == 3)
 	u8 nhm[MAX_CHANNEL_NUM][NHM_RPT_NUM];
 	#endif
@@ -130,6 +130,7 @@ u8 rtw_acs_get_num_ratio_by_ch_idx(_adapter *adapter, u8 ch_idx);
 
 u8 rtw_phydm_clm_ratio(_adapter *adapter);
 u8 rtw_phydm_nhm_ratio(_adapter *adapter);
+u8 rtw_phydm_nhm_noise_pwr(_adapter *adapter);
 
 void rtw_acs_reset(_adapter *adapter);
 void rtw_acs_trigger(_adapter *adapter, u16 scan_time_ms, u8 scan_chan, enum NHM_PID pid);
@@ -142,7 +143,7 @@ void rtw_acs_current_info_dump(void *sel, _adapter *adapter);
 
 void rtw_acs_start(_adapter *adapter);
 void rtw_acs_stop(_adapter *adapter);
-
+u8 rtw_acs_get_rsni(_adapter *adapter, s8 rcpi, u8 ch);
 #endif /*CONFIG_RTW_ACS*/
 
 #ifdef CONFIG_BACKGROUND_NOISE_MONITOR

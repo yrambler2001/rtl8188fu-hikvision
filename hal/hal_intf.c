@@ -36,6 +36,10 @@ const u32 _chip_type_to_odm_ic_type[] = {
 	ODM_RTL8192F,
 	ODM_RTL8822C,
 	ODM_RTL8814B,
+	ODM_RTL8723F,
+#if defined(CONFIG_RTL8822E)
+	ODM_RTL8822E,
+#endif
 	0,
 };
 
@@ -86,13 +90,12 @@ static void rtw_init_wireless_mode(_adapter *padapter)
 	struct hal_spec_t *hal_spec = GET_HAL_SPEC(padapter);
 	if(hal_spec->proto_cap & PROTO_CAP_11B)
 		proto_wireless_mode |= WIRELESS_11B;
-	
+
 	if(hal_spec->proto_cap & PROTO_CAP_11G)
 		proto_wireless_mode |= WIRELESS_11G;
-#ifdef CONFIG_80211AC_VHT
+
 	if(hal_spec->band_cap & BAND_CAP_5G)
 		proto_wireless_mode |= WIRELESS_11A;
-#endif
 
 #ifdef CONFIG_80211N_HT
 	if(hal_spec->proto_cap & PROTO_CAP_11N) {
@@ -144,6 +147,10 @@ u8 rtw_hal_data_init(_adapter *padapter)
 			RTW_INFO("cant not alloc memory for HAL DATA\n");
 			return _FAIL;
 		}
+		GET_HAL_DATA(padapter)->adapter = padapter;
+		#if CONFIG_TXPWR_LIMIT
+		hal_txpwr_lmt_tb_init(padapter->HalData);
+		#endif
 		rtw_phydm_priv_init(padapter);
 	}
 	return _SUCCESS;
@@ -153,6 +160,9 @@ void rtw_hal_data_deinit(_adapter *padapter)
 {
 	if (is_primary_adapter(padapter)) {
 		if (padapter->HalData) {
+			#if CONFIG_TXPWR_LIMIT
+			hal_txpwr_lmt_tb_deinit(padapter->HalData);
+			#endif
 #ifdef CONFIG_LOAD_PHY_PARA_FROM_FILE
 			phy_free_filebuf(padapter);
 #endif
@@ -252,6 +262,7 @@ void dump_hal_trx_mode(void *sel, _adapter *adapter)
 {
 	struct registry_priv *regpriv = &adapter->registrypriv;
 	PHAL_DATA_TYPE hal_data = GET_HAL_DATA(adapter);
+	int i;
 
 	RTW_PRINT_SEL(sel, "trx_path_bmp:0x%02x(%s), NumTotalRFPath:%u, max_tx_cnt:%u\n"
 		, hal_data->trx_path_bmp
@@ -261,6 +272,9 @@ void dump_hal_trx_mode(void *sel, _adapter *adapter)
 	);
 	RTW_PRINT_SEL(sel, "tx_nss:%u, rx_nss:%u\n"
 		, hal_data->tx_nss, hal_data->rx_nss);
+	for (i = 0; i < hal_data->tx_nss; i++)
+		RTW_PRINT_SEL(sel, "txpath_cap_num_%uss:%u\n"
+			, i + 1, hal_data->txpath_cap_num_nss[i]);
 	RTW_PRINT_SEL(sel, "\n");
 
 	dump_hal_runtime_trx_mode(sel, adapter);
@@ -382,6 +396,7 @@ u8 rtw_hal_trxnss_init(_adapter *adapter)
 	struct hal_spec_t *hal_spec = GET_HAL_SPEC(adapter);
 	PHAL_DATA_TYPE hal_data = GET_HAL_DATA(adapter);
 	enum rf_type rf_path = GET_HAL_RFPATH(adapter);
+	int i;
 
 	hal_data->tx_nss = hal_spec->tx_nss_num;
 	hal_data->rx_nss = hal_spec->rx_nss_num;
@@ -392,6 +407,23 @@ u8 rtw_hal_trxnss_init(_adapter *adapter)
 	if (NSS_VALID(regpriv->rx_nss))
 		hal_data->rx_nss = rtw_min(hal_data->rx_nss, regpriv->rx_nss);
 	hal_data->rx_nss = rtw_min(hal_data->rx_nss, rf_type_to_rf_rx_cnt(rf_path));
+
+	for (i = 0; i < 4; i++) {
+		if (hal_data->tx_nss < i + 1)
+			break;
+
+		if (IS_HARDWARE_TYPE_8814B(adapter) /* 8814B is always full-TX */
+			#ifdef CONFIG_RTW_TX_NPATH_EN
+			/* these IC is capable of full-TX when macro defined */
+			|| IS_HARDWARE_TYPE_8192E(adapter) || IS_HARDWARE_TYPE_8192F(adapter)
+			|| IS_HARDWARE_TYPE_8812(adapter) || IS_HARDWARE_TYPE_8822B(adapter)
+			|| IS_HARDWARE_TYPE_8822C(adapter) || IS_HARDWARE_TYPE_8822E(adapter)
+			#endif
+		)
+			hal_data->txpath_cap_num_nss[i] = hal_data->max_tx_cnt;
+		else
+			hal_data->txpath_cap_num_nss[i] = i + 1;
+	}
 
 	if (1)
 		_dump_trx_nss(RTW_DBGDUMP, adapter);
@@ -650,6 +682,11 @@ uint rtw_hal_deinit(_adapter *padapter)
 	return status;
 }
 
+bool rtw_hw_is_init_completed(struct dvobj_priv *dvobj)
+{
+	return rtw_get_hw_init_completed(dvobj_get_primary_adapter(dvobj));
+}
+
 u8 rtw_hal_set_hwreg(_adapter *padapter, u8 variable, u8 *val)
 {
 	return padapter->hal_func.set_hw_reg_handler(padapter, variable, val);
@@ -831,6 +868,13 @@ u8	rtw_hal_intf_ps_func(_adapter *padapter, HAL_INTF_PS_FUNC efunc_id, u8 *val)
 	return _FAIL;
 }
 
+#ifdef CONFIG_RTW_MGMT_QUEUE
+s32	rtw_hal_mgmt_xmitframe_enqueue(_adapter *padapter, struct xmit_frame *pxmitframe)
+{
+	return padapter->hal_func.hal_mgmt_xmitframe_enqueue(padapter, pxmitframe);
+}
+#endif
+
 s32	rtw_hal_xmitframe_enqueue(_adapter *padapter, struct xmit_frame *pxmitframe)
 {
 	return padapter->hal_func.hal_xmitframe_enqueue(padapter, pxmitframe);
@@ -846,9 +890,16 @@ s32	rtw_hal_xmit(_adapter *padapter, struct xmit_frame *pxmitframe)
  */
 s32	rtw_hal_mgnt_xmit(_adapter *padapter, struct xmit_frame *pmgntframe)
 {
+#ifdef CONFIG_RTW_MGMT_QUEUE
+	_irqL irqL;
+	struct xmit_priv *pxmitpriv = &(padapter->xmitpriv);
+#endif
 	s32 ret = _FAIL;
 
 	update_mgntframe_attrib_addr(padapter, pmgntframe);
+#ifdef CONFIG_RTW_MGMT_QUEUE
+	update_mgntframe_subtype(padapter, pmgntframe);
+#endif
 
 #if defined(CONFIG_IEEE80211W) || defined(CONFIG_RTW_MESH)
 	if ((!MLME_IS_MESH(padapter) && SEC_IS_BIP_KEY_INSTALLED(&padapter->securitypriv) == _TRUE)
@@ -857,6 +908,25 @@ s32	rtw_hal_mgnt_xmit(_adapter *padapter, struct xmit_frame *pmgntframe)
 		#endif
 	)
 		rtw_mgmt_xmitframe_coalesce(padapter, pmgntframe->pkt, pmgntframe);
+#endif
+
+#if defined(CONFIG_AP_MODE) || defined(CONFIG_TDLS)
+#ifdef CONFIG_RTW_MGMT_QUEUE
+	if (MLME_IS_AP(padapter) || MLME_IS_MESH(padapter)) {
+		_enter_critical_bh(&pxmitpriv->lock, &irqL);
+		ret = mgmt_xmitframe_enqueue_for_sleeping_sta(padapter, pmgntframe);
+		_exit_critical_bh(&pxmitpriv->lock, &irqL);
+
+		#ifdef DBG_MGMT_QUEUE
+		if (ret == _TRUE)
+			RTW_INFO("%s doesn't be queued, dattrib->ra:"MAC_FMT" seq_num = %u, subtype = 0x%x\n",
+			__func__, MAC_ARG(pmgntframe->attrib.ra), pmgntframe->attrib.seqnum, pmgntframe->attrib.subtype);
+		#endif
+
+		if (ret == RTW_QUEUE_MGMT)
+			return ret;
+	}
+#endif
 #endif
 
 	ret = padapter->hal_func.mgnt_xmit(padapter, pmgntframe);
@@ -1029,13 +1099,25 @@ void	rtw_hal_interrupt_handler(_adapter *padapter, u16 pkt_len, u8 *pbuf)
 }
 #endif
 
-void	rtw_hal_set_chnl_bw(_adapter *padapter, u8 channel, enum channel_width Bandwidth, u8 Offset40, u8 Offset80)
+void rtw_hal_set_chnl_bw(_adapter *padapter, u8 cch, enum channel_width Bandwidth, u8 Offset40, u8 Offset80)
 {
 	PHAL_DATA_TYPE	pHalData = GET_HAL_DATA(padapter);
-	/*u8 cch_160 = Bandwidth == CHANNEL_WIDTH_160 ? channel : 0;*/
-	u8 cch_80 = Bandwidth == CHANNEL_WIDTH_80 ? channel : 0;
-	u8 cch_40 = Bandwidth == CHANNEL_WIDTH_40 ? channel : 0;
-	u8 cch_20 = Bandwidth == CHANNEL_WIDTH_20 ? channel : 0;
+	/*u8 cch_160 = Bandwidth == CHANNEL_WIDTH_160 ? cch : 0;*/
+	u8 cch_80 = Bandwidth == CHANNEL_WIDTH_80 ? cch : 0;
+	u8 cch_40 = Bandwidth == CHANNEL_WIDTH_40 ? cch : 0;
+	u8 cch_20 = Bandwidth == CHANNEL_WIDTH_20 ? cch : 0;
+
+#ifdef CONFIG_DFS_MASTER
+	struct dfs_rd_ch_switch_ctx dfs_rd_cs_ctx;
+	u8 band_idx = HW_BAND_0;
+	enum band_type band;
+	u8 ch, bw, offset;
+
+	rtw_get_oper_bchbw_by_hwband(adapter_to_dvobj(padapter), band_idx, &band, &ch, &bw, &offset);
+
+	hal_dfs_rd_setting_before_ch_switch(pHalData, band_idx
+		, band, ch, bw, offset, &dfs_rd_cs_ctx);
+#endif
 
 	if (rtw_phydm_is_iqk_in_progress(padapter))
 		RTW_ERR("%s, %d, IQK may race condition\n", __func__, __LINE__);
@@ -1061,16 +1143,24 @@ void	rtw_hal_set_chnl_bw(_adapter *padapter, u8 channel, enum channel_width Band
 
 	if (0)
 		RTW_INFO("%s cch:%u, %s, offset40:%u, offset80:%u (%u, %u, %u)\n", __func__
-			, channel, ch_width_str(Bandwidth), Offset40, Offset80
+			, cch, ch_width_str(Bandwidth), Offset40, Offset80
 			, pHalData->cch_80, pHalData->cch_40, pHalData->cch_20);
 
-	padapter->hal_func.set_chnl_bw_handler(padapter, channel, Bandwidth, Offset40, Offset80);
+	padapter->hal_func.set_chnl_bw_handler(padapter, cch, Bandwidth, Offset40, Offset80);
+
+#ifdef CONFIG_DFS_MASTER
+	hal_dfs_rd_setting_after_ch_switch(pHalData, band_idx
+		, band, ch, bw, offset, &dfs_rd_cs_ctx);
+#endif
 }
 
 void	rtw_hal_dm_watchdog(_adapter *padapter)
 {
 
 	rtw_hal_turbo_edca(padapter);
+#ifndef CONFIG_DIRECT_EDCCA_MODE_SETTING
+	rtw_edcca_hal_update(adapter_to_dvobj(padapter));
+#endif
 	padapter->hal_func.hal_dm_watchdog(padapter);
 }
 
@@ -1261,12 +1351,15 @@ s32 c2h_handler(_adapter *adapter, u8 id, u8 seq, u8 plen, u8 *payload)
 
 #if defined(CONFIG_TDLS) && defined(CONFIG_TDLS_CH_SW)
 	case C2H_FW_CHNL_SWITCH_COMPLETE:
+#ifndef CONFIG_TDLS_CH_SW_V2
 		rtw_tdls_chsw_oper_done(adapter);
-		break;
-	case C2H_BCN_EARLY_RPT:
-		rtw_tdls_ch_sw_back_to_base_chnl(adapter);
+#endif
 		break;
 #endif
+
+	case C2H_BCN_EARLY_RPT:
+		rtw_hal_bcn_early_rpt_c2h_handler(adapter);
+		break;
 
 #ifdef CONFIG_MCC_MODE
 	case C2H_MCC:
@@ -1313,7 +1406,7 @@ s32 c2h_handler(_adapter *adapter, u8 id, u8 seq, u8 plen, u8 *payload)
 	case C2H_EXTEND:
 		sub_id = payload[0];
 		/* no handle, goto default */
-		/* fall through */
+		fallthrough;
 
 	default:
 		if (phydm_c2H_content_parsing(adapter_to_phydm(adapter), id, plen, payload) != TRUE)
@@ -1361,11 +1454,6 @@ s32 rtw_hal_c2h_id_handle_directly(_adapter *adapter, u8 id, u8 seq, u8 plen, u8
 	}
 }
 #endif /* !RTW_HALMAC */
-
-s32 rtw_hal_is_disable_sw_channel_plan(PADAPTER padapter)
-{
-	return GET_HAL_DATA(padapter)->bDisableSWChannelPlan;
-}
 
 #ifdef CONFIG_PROTSEL_MACSLEEP
 static s32 _rtw_hal_macid_sleep(_adapter *adapter, u8 macid, u8 sleep)
@@ -1888,6 +1976,13 @@ void rtw_hal_fw_correct_bcn(_adapter *padapter)
 }
 #endif
 
+bool rtw_txpwr_hal_get_pwr_lmt_en(struct dvobj_priv *dvobj)
+{
+	HAL_DATA_TYPE *hal_data = GET_HAL_DATA(dvobj_get_primary_adapter(dvobj));
+
+	return hal_data->txpwr_limit_loaded;
+}
+
 void rtw_hal_set_tx_power_level(_adapter *adapter, u8 channel)
 {
 	HAL_DATA_TYPE *hal_data = GET_HAL_DATA(adapter);
@@ -1901,13 +1996,6 @@ void rtw_hal_set_tx_power_level(_adapter *adapter, u8 channel)
 	rtw_hal_set_txpwr_done(adapter);
 
 	hal_data->set_entire_txpwr = 0;
-}
-
-void rtw_hal_update_txpwr_level(_adapter *adapter)
-{
-	HAL_DATA_TYPE *hal_data = GET_HAL_DATA(adapter);
-
-	rtw_hal_set_tx_power_level(adapter, hal_data->current_channel);
 }
 
 void rtw_hal_set_txpwr_done(_adapter *adapter)
@@ -1941,6 +2029,61 @@ s8 rtw_hal_get_txpwr_target_extra_bias(_adapter *adapter, enum rf_path rfpath
 	}
 
 	return val;
+}
+
+int rtw_hal_tx_pause(_adapter *adapter, enum tx_pause_rson rson, bool tx_pause)
+{
+	HAL_DATA_TYPE *hal_data = GET_HAL_DATA(adapter);
+	u8 *tx_off;
+	enum tx_pause_rson i;
+	u8 tx_cfg = 0, val;
+	int ret = _FAIL;
+
+	tx_off = &hal_data->tx_pause[rson];
+	if (tx_pause == true) {
+		switch (rson) {
+		case PAUSE_RSON_DFS_CAC:
+		case PAUSE_RSON_TOKEN_BASED_XMIT:
+			*tx_off = (u8)StopAll;
+			break;
+		case PAUSE_RSON_DFS_CSA:
+			*tx_off = (u8)~StopBecon;
+			break;
+		case PAUSE_RSON_DFS_CSA_MG:
+			*tx_off = (u8)~(StopBecon | StopMgt);
+			break;
+		case PAUSE_RSON_SCAN:
+		case PAUSE_RSON_JOIN:
+		case PAUSE_RSON_CORRECT_TSF:
+		case PAUSE_RSON_OTHER_BCN_CTRL:
+			*tx_off = (u8)StopBecon;
+			break;
+		default:
+			RTW_ERR("Unknow pause reason:%d\n", rson);
+			goto _error;
+		}
+	} else {
+		*tx_off = 0;
+	}
+	*tx_off &= StopAll;
+	if (((*tx_off) & (StopBecon | StopHigh | StopMgt)) == (StopBecon | StopHigh | StopMgt))
+		*tx_off |= StopBcnHiMgt;
+
+	tx_off = hal_data->tx_pause;
+	for (i = 0; (i < PAUSE_RSON_MAX) && (tx_cfg != StopAll); i++)
+		if (tx_off[i])
+			tx_cfg |= tx_off[i];
+
+	RTW_DBG("TX %sPause - Reason(%d) final tx_cfg(0x%02x)\n",
+		 tx_pause?"":"Un-", rson, tx_cfg);
+
+	rtw_hal_get_hwreg(adapter, HW_VAR_TXPAUSE, &val);
+	ret = _SUCCESS;
+	if (val != tx_cfg)
+		ret = rtw_hal_set_hwreg(adapter, HW_VAR_TXPAUSE, &tx_cfg);
+
+_error:
+	return ret;
 }
 
 #ifdef RTW_HALMAC

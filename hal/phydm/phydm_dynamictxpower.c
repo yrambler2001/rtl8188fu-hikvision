@@ -226,8 +226,8 @@ void phydm_dtp_init_2nd(void *dm_void)
 	if (!(dm->support_ability & ODM_BB_DYNAMIC_TXPWR))
 		return;
 
-	#if (RTL8822C_SUPPORT || RTL8812F_SUPPORT)
-	if (dm->support_ic_type & (ODM_RTL8822C | ODM_RTL8812F)) {
+	#if (RTL8822C_SUPPORT || RTL8812F_SUPPORT || RTL8822E_SUPPORT)
+	if (dm->support_ic_type & (ODM_RTL8822C | ODM_RTL8812F | ODM_RTL8822E)) {
 		phydm_rst_ram_pwr(dm);
 		/* rsp tx use type 0*/
 		odm_set_mac_reg(dm, R_0x6d8, BIT(19) | BIT(18), RAM_PWR_OFST0);
@@ -243,7 +243,7 @@ phydm_check_rates(void *dm_void, u8 rate_idx)
 	u32 check_rate_bitmap0 = 0x08080808; /* @check CCK11M, OFDM54M, MCS7, MCS15*/
 	u32 check_rate_bitmap1 = 0x80200808; /* @check MCS23, MCS31, VHT1SS M9, VHT2SS M9*/
 	u32 check_rate_bitmap2 = 0x00080200; /* @check VHT3SS M9, VHT4SS M9*/
-	u32 bitmap_result;
+	u32 bitmap_result = 0;
 
 #if (RTL8822B_SUPPORT)
 	if (dm->support_ic_type & ODM_RTL8822B) {
@@ -291,7 +291,7 @@ phydm_check_rates(void *dm_void, u8 rate_idx)
 		bitmap_result = BIT(rate_idx - 64) & check_rate_bitmap2;
 	else if (rate_idx >= 32)
 		bitmap_result = BIT(rate_idx - 32) & check_rate_bitmap1;
-	else if (rate_idx <= 31)
+	else // if (rate_idx <= 31)
 		bitmap_result = BIT(rate_idx) & check_rate_bitmap0;
 
 	if (bitmap_result != 0)
@@ -336,7 +336,7 @@ u8 phydm_search_min_power_index(void *dm_void)
 	enum rf_path path;
 	enum rf_path max_path;
 	u8 min_gain_index = 0x3f;
-	u8 gain_index;
+	u8 gain_index = 0;
 	u8 i;
 
 	PHYDM_DBG(dm, DBG_DYN_TXPWR, "%s\n", __func__);
@@ -521,10 +521,15 @@ void phydm_dtp_per_sta(void *dm_void)
 	struct cmn_sta_info *sta = NULL;
 	struct dtp_info *dtp = NULL;
 	struct rssi_info *rssi = NULL;
+	struct phydm_bb_ram_ctrl *bb_ctrl = &dm->p_bb_ram_ctrl;
 	u8 sta_cnt = 0;
 	u8 i = 0;
 	u8 curr_pwr_lv = 0;
 	u8 last_pwr_lv = 0;
+	u8 mac_id_cnt = 0;
+	u64 macid_cur = 0;
+	u64 macid_diff = 0;
+	u64 macid_mask = 0;
 
 	for (i = 0; i < ODM_ASSOCIATE_ENTRY_NUM; i++) {
 		sta = dm->phydm_sta_info[i];
@@ -533,6 +538,10 @@ void phydm_dtp_per_sta(void *dm_void)
 
 			dtp = &sta->dtp_stat;
 			rssi = &sta->rssi_stat;
+			macid_mask = (u64)BIT(sta->mac_id);
+			if (!(bb_ctrl->macid_is_linked & macid_mask))
+				dtp->sta_last_dtp_lvl = tx_high_pwr_level_normal;
+
 			last_pwr_lv = dtp->sta_last_dtp_lvl;
 			curr_pwr_lv = phydm_pwr_lvl_check(dm, rssi->rssi,
 							  last_pwr_lv);
@@ -541,34 +550,51 @@ void phydm_dtp_per_sta(void *dm_void)
 				  "STA_id=%d, MACID=%d , RSSI: %d , GetPwrLv: %d\n",
 				  i, sta->mac_id, rssi->rssi, curr_pwr_lv);
 
-			if (curr_pwr_lv == last_pwr_lv) {
+			bb_ctrl->macid_is_linked |= macid_mask;
+			macid_cur |= macid_mask;
+			PHYDM_DBG(dm, DBG_DYN_TXPWR,
+				    "macid_is_linked: (0x%llx), macid_cur: (0x%llx)\n",
+				    bb_ctrl->macid_is_linked, macid_cur);
+
+			if (curr_pwr_lv == last_pwr_lv && dtp->sta_is_alive) {
 				dtp->sta_tx_high_power_lvl = last_pwr_lv;
 				PHYDM_DBG(dm, DBG_DYN_TXPWR,
 					  "DTP_lv not change: ((%d))\n",
 					  curr_pwr_lv);
-				return;
-			}
+			} else {
+				PHYDM_DBG(dm, DBG_DYN_TXPWR,
+					  "DTP_lv update: ((%d)) -> ((%d))\n",
+					  last_pwr_lv, curr_pwr_lv);
 
-			PHYDM_DBG(dm, DBG_DYN_TXPWR,
-				  "DTP_lv update: ((%d)) -> ((%d))\n",
-				  last_pwr_lv, curr_pwr_lv);
+				dtp->sta_last_dtp_lvl = curr_pwr_lv;
 
-			dtp->sta_last_dtp_lvl = curr_pwr_lv;
-
-			switch (dm->ic_ip_series) {
-			#ifdef BB_RAM_SUPPORT
-			case PHYDM_IC_JGR3:
-				phydm_dtp_fill_cmninfo_2nd(dm, i, curr_pwr_lv);
-				break;
-			#endif
-			default:
-				phydm_dtp_fill_cmninfo(dm, i, curr_pwr_lv);
-				break;
+				switch (dm->ic_ip_series) {
+				#ifdef BB_RAM_SUPPORT
+				case PHYDM_IC_JGR3:
+					phydm_dtp_fill_cmninfo_2nd(dm, i, curr_pwr_lv);
+					break;
+				#endif
+				default:
+					phydm_dtp_fill_cmninfo(dm, i, curr_pwr_lv);
+					break;
+				}
+				if(!dtp->sta_is_alive)
+					dtp->sta_is_alive = true;
 			}
 
 			if (sta_cnt == dm->number_linked_client)
 				break;
 		}
+	}
+
+	macid_diff = bb_ctrl->macid_is_linked ^ macid_cur;
+	if (macid_diff)
+		bb_ctrl->macid_is_linked &= ~macid_diff;
+	while (macid_diff) {
+		if (macid_diff & 0x1)
+			phydm_pwr_lv_ctrl(dm, mac_id_cnt, tx_high_pwr_level_normal);
+		mac_id_cnt++;
+		macid_diff >>= 1;
 	}
 }
 

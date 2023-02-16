@@ -24,7 +24,7 @@ s32	rtl8188fu_init_xmit_priv(_adapter *padapter)
 
 #ifdef PLATFORM_LINUX
 	tasklet_init(&pxmitpriv->xmit_tasklet,
-		     (void(*)(unsigned long))rtl8188fu_xmit_tasklet,
+		     rtl8188fu_xmit_tasklet,
 		     (unsigned long)padapter);
 #endif
 	return _SUCCESS;
@@ -371,7 +371,14 @@ s32 rtl8188fu_xmitframe_complete(_adapter *padapter, struct xmit_priv *pxmitpriv
 	int res = _SUCCESS;
 #endif
 
-
+#ifdef CONFIG_RTW_MGMT_QUEUE
+	/* dump management frame directly */
+	pxmitframe = rtw_dequeue_mgmt_xframe(pxmitpriv);
+	if (pxmitframe) {
+		rtw_dump_xframe(padapter, pxmitframe);
+		return _TRUE;
+	}
+#endif
 
 	/* check xmitbuffer is ok */
 	if (pxmitbuf == NULL) {
@@ -622,6 +629,14 @@ s32 rtl8188fu_xmitframe_complete(_adapter *padapter, struct xmit_priv *pxmitpriv
 	phwxmits = pxmitpriv->hwxmits;
 	hwentry = pxmitpriv->hwxmit_entry;
 
+#ifdef CONFIG_RTW_MGMT_QUEUE
+	/* dump management frame directly */
+	pxmitframe = rtw_dequeue_mgmt_xframe(pxmitpriv);
+	if (pxmitframe) {
+		rtw_dump_xframe(padapter, pxmitframe);
+		return _TRUE;
+	}
+#endif
 
 	if (pxmitbuf == NULL) {
 		pxmitbuf = rtw_alloc_xmitbuf(pxmitpriv);
@@ -757,6 +772,25 @@ s32 rtl8188fu_hal_xmit(_adapter *padapter, struct xmit_frame *pxmitframe)
 {
 	return pre_xmitframe(padapter, pxmitframe);
 }
+
+#ifdef CONFIG_RTW_MGMT_QUEUE
+s32 rtl8188fu_hal_mgmt_xmitframe_enqueue(PADAPTER padapter, struct xmit_frame *pxmitframe)
+{
+	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
+	s32 err;
+
+	err = rtw_mgmt_xmitframe_enqueue(padapter, pxmitframe);
+	if (err != _SUCCESS) {
+		rtw_free_xmitframe(pxmitpriv, pxmitframe);
+		pxmitpriv->tx_drop++;
+	} else {
+#ifdef PLATFORM_LINUX
+		tasklet_hi_schedule(&pxmitpriv->xmit_tasklet);
+#endif
+	}
+	return err;
+}
+#endif
 
 s32	rtl8188fu_hal_xmitframe_enqueue(_adapter *padapter, struct xmit_frame *pxmitframe)
 {

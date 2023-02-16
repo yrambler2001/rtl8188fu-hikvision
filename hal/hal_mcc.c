@@ -1273,7 +1273,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 	struct hal_com_data *hal = GET_HAL_DATA(adapter);
 	struct hal_spec_t *hal_spec = GET_HAL_SPEC(adapter);
 	struct mcc_adapter_priv *mccadapriv = NULL;
-#if defined(CONFIG_RTL8822C)
+#if defined(CONFIG_RTL8822C) || defined(CONFIG_RTL8822E)
 	struct dm_struct *phydm = adapter_to_phydm(adapter);
 	struct txagc_table_8822c tab;
 	u8 agc_buff[2][NUM_RATE_AC_2SS]; /* tatol 0x40 rate index for PATH A/B */
@@ -1327,7 +1327,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 			CurtPktPageNum = (u8)PageNum(tx_desc + len, page_size);
 			*total_page_num += CurtPktPageNum;
 			*index += (CurtPktPageNum * page_size);
-			RSVD_PAGE_CFG("LocNull", CurtPktPageNum, *total_page_num, *index);
+			RSVD_PAGE_CFG("LocNull", CurtPktPageNum, *total_page_num);
 			break;
 		case MCC_ROLE_AP:
 			/* Bulid CTS */
@@ -1342,7 +1342,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 			CurtPktPageNum = (u8)PageNum(tx_desc + len, page_size);
 			*total_page_num += CurtPktPageNum;
 			*index += (CurtPktPageNum * page_size);
-			RSVD_PAGE_CFG("LocCTS", CurtPktPageNum, *total_page_num, *index);
+			RSVD_PAGE_CFG("LocCTS", CurtPktPageNum, *total_page_num);
 			break;
 		case MCC_ROLE_GO:
 		/* To DO */
@@ -1383,7 +1383,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 			i, pmccobjpriv->mcc_pwr_idx_rsvd_page[i]);
 
 		total_rate_offset = start;
-#if !defined(CONFIG_RTL8822C)			
+#if !defined(CONFIG_RTL8822C) && !defined(CONFIG_RTL8822E)
 		for (path = RF_PATH_A; path < hal_spec->rf_reg_path_num; ++path) {
 			total_rate = 0;
 			/* PATH A for 0~63 byte, PATH B for 64~127 byte*/
@@ -1402,7 +1402,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 				rates = rates_by_sections[CCK].rates;
 				for (j = 0; j < rate_array_sz; ++j) {
 					power_index = phy_get_tx_power_index_ex(iface, path, CCK, rates[j], bw, band, center_ch, ch);
-					rate = PHY_GetRateIndexOfTxPowerByRate(rates[j]);
+					rate = phy_get_rate_idx_of_txpwr_by_rate(rates[j]);
 
 					shift = rate % 4;
 					if (shift == 0) {
@@ -1444,7 +1444,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 			rates = rates_by_sections[OFDM].rates;
 			for (j = 0; j < rate_array_sz; ++j) {
 				power_index = phy_get_tx_power_index_ex(iface, path, OFDM, rates[j], bw, band, center_ch, ch);
-				rate = PHY_GetRateIndexOfTxPowerByRate(rates[j]);
+				rate = phy_get_rate_idx_of_txpwr_by_rate(rates[j]);
 
 				shift = rate % 4;
 				if (shift == 0) {
@@ -1484,7 +1484,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 			rates = rates_by_sections[HT_MCS0_MCS7].rates;
 			for (j = 0; j < rate_array_sz; ++j) {
 				power_index = phy_get_tx_power_index_ex(iface, path, HT_1SS, rates[j], bw, band, center_ch, ch);
-				rate = PHY_GetRateIndexOfTxPowerByRate(rates[j]);
+				rate = phy_get_rate_idx_of_txpwr_by_rate(rates[j]);
 
 				shift = rate % 4;
 				if (shift == 0) {
@@ -1524,7 +1524,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 			rates = rates_by_sections[HT_MCS8_MCS15].rates;
 			for (j = 0; j < rate_array_sz; ++j) {
 				power_index = phy_get_tx_power_index_ex(iface, path, HT_2SS, rates[j], bw, band, center_ch, ch);
-				rate = PHY_GetRateIndexOfTxPowerByRate(rates[j]);
+				rate = phy_get_rate_idx_of_txpwr_by_rate(rates[j]);
 
 				shift = rate % 4;
 				if (shift == 0) {
@@ -1563,7 +1563,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 			rates = rates_by_sections[VHT_1SSMCS0_1SSMCS9].rates;
 			for (j = 0; j < rate_array_sz; ++j) {
 				power_index = phy_get_tx_power_index_ex(iface, path, VHT_1SS, rates[j], bw, band, center_ch, ch);
-				rate = PHY_GetRateIndexOfTxPowerByRate(rates[j]);
+				rate = phy_get_rate_idx_of_txpwr_by_rate(rates[j]);
 
 				shift = rate % 4;
 				if (shift == 0) {
@@ -1599,7 +1599,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 			rates = rates_by_sections[VHT_2SSMCS0_2SSMCS9].rates;
 			for (j = 0; j < rate_array_sz; ++j) {
 				power_index = phy_get_tx_power_index_ex(iface, path, VHT_2SS, rates[j], bw, band, center_ch, ch);
-				rate = PHY_GetRateIndexOfTxPowerByRate(rates[j]);
+				rate = phy_get_rate_idx_of_txpwr_by_rate(rates[j]);
 
 				shift = rate % 4;
 				if (shift == 0) {
@@ -1644,7 +1644,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 			CurtPktPageNum = 1;
 			*total_page_num += CurtPktPageNum;
 			*index += (CurtPktPageNum * page_size);
-			RSVD_PAGE_CFG("mcc_pwr_idx_rsvd_page", CurtPktPageNum, *total_page_num, *index);
+			RSVD_PAGE_CFG("mcc_pwr_idx_rsvd_page", CurtPktPageNum, *total_page_num);
 #else /* 8822C */
 			for (path = RF_PATH_A; path < hal_spec->rf_reg_path_num; ++path) {
 				/* CCK */
@@ -1653,7 +1653,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 					rates = rates_by_sections[CCK].rates;
 					for (j = 0; j < rate_array_sz; ++j) {
 						power_index = phy_get_tx_power_index_ex(iface, path, CCK, rates[j], bw, band, center_ch, ch);
-						rate = PHY_GetRateIndexOfTxPowerByRate(rates[j]);
+						rate = phy_get_rate_idx_of_txpwr_by_rate(rates[j]);
 						agc_buff[path][rate] = power_index;
 					}
 				}
@@ -1663,7 +1663,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 				rates = rates_by_sections[OFDM].rates;
 				for (j = 0; j < rate_array_sz; ++j) {
 					power_index = phy_get_tx_power_index_ex(iface, path, OFDM, rates[j], bw, band, center_ch, ch);
-					rate = PHY_GetRateIndexOfTxPowerByRate(rates[j]);
+					rate = phy_get_rate_idx_of_txpwr_by_rate(rates[j]);
 					agc_buff[path][rate] = power_index;
 				}
 				/* HT */
@@ -1671,7 +1671,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 				rates = rates_by_sections[HT_MCS0_MCS7].rates;
 				for (j = 0; j < rate_array_sz; ++j) {
 					power_index = phy_get_tx_power_index_ex(iface, path, HT_1SS, rates[j], bw, band, center_ch, ch);
-					rate = PHY_GetRateIndexOfTxPowerByRate(rates[j]);
+					rate = phy_get_rate_idx_of_txpwr_by_rate(rates[j]);
 					agc_buff[path][rate] = power_index;
 				}
 
@@ -1679,7 +1679,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 				rates = rates_by_sections[HT_MCS8_MCS15].rates;
 				for (j = 0; j < rate_array_sz; ++j) {
 					power_index = phy_get_tx_power_index_ex(iface, path, HT_2SS, rates[j], bw, band, center_ch, ch);
-					rate = PHY_GetRateIndexOfTxPowerByRate(rates[j]);
+					rate = phy_get_rate_idx_of_txpwr_by_rate(rates[j]);
 					agc_buff[path][rate] = power_index;
 				}
 				/* VHT */
@@ -1687,7 +1687,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 				rates = rates_by_sections[VHT_1SSMCS0_1SSMCS9].rates;
 				for (j = 0; j < rate_array_sz; ++j) {
 					power_index = phy_get_tx_power_index_ex(iface, path, VHT_1SS, rates[j], bw, band, center_ch, ch);
-					rate = PHY_GetRateIndexOfTxPowerByRate(rates[j]);
+					rate = phy_get_rate_idx_of_txpwr_by_rate(rates[j]);
 					agc_buff[path][rate] = power_index;
 				}
 
@@ -1695,7 +1695,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 				rates = rates_by_sections[VHT_2SSMCS0_2SSMCS9].rates;
 				for (j = 0; j < rate_array_sz; ++j) {
 					power_index = phy_get_tx_power_index_ex(iface, path, VHT_2SS, rates[j], bw, band, center_ch, ch);
-					rate = PHY_GetRateIndexOfTxPowerByRate(rates[j]);
+					rate = phy_get_rate_idx_of_txpwr_by_rate(rates[j]);
 					agc_buff[path][rate] = power_index;
 				}
 			}
@@ -1712,7 +1712,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 			CurtPktPageNum = 1;
 			*total_page_num += CurtPktPageNum;
 			*index += (CurtPktPageNum * page_size);
-			RSVD_PAGE_CFG("mcc_pwr_idx_rsvd_page", CurtPktPageNum, *total_page_num, *index);
+			RSVD_PAGE_CFG("mcc_pwr_idx_rsvd_page", CurtPktPageNum, *total_page_num);
 			#ifdef DBG_PWR_IDX_RSVD_PAGE
 			if (1) {
 				u8 path_idx;
@@ -2311,8 +2311,9 @@ static void rtw_hal_mcc_start_prehdl(PADAPTER padapter)
 		mccadapriv->role = MCC_ROLE_MAX;
 	}
 
-#ifdef CONFIG_RTL8822C
-	if (IS_HARDWARE_TYPE_8822C(padapter)) {
+#if defined(CONFIG_RTL8822C) || defined(CONFIG_RTL8822E)
+	if (IS_HARDWARE_TYPE_8822C(padapter) ||
+		IS_HARDWARE_TYPE_8822E(padapter)) {
 		HAL_DATA_TYPE *hal = GET_HAL_DATA(padapter);
 		struct dm_struct *dm = &hal->odmpriv;
 		
@@ -2485,8 +2486,9 @@ static void rtw_hal_mcc_stop_posthdl(PADAPTER padapter)
 	rtw_hal_mcc_cfg_phydm(padapter, MCC_CFG_PHYDM_STOP, NULL);
 	#endif
 
-#ifdef CONFIG_RTL8822C
-	if (IS_HARDWARE_TYPE_8822C(padapter)) {
+#if defined(CONFIG_RTL8822C) || defined(CONFIG_RTL8822E)
+	if (IS_HARDWARE_TYPE_8822C(padapter) ||
+		IS_HARDWARE_TYPE_8822E(padapter)) {
 		HAL_DATA_TYPE *hal = GET_HAL_DATA(padapter);
 		struct dm_struct *dm = &hal->odmpriv;
 		
@@ -2764,7 +2766,7 @@ static u8 mcc_get_reg_hdl(PADAPTER adapter, const u8 *val)
 	_adapter *cur_iface = NULL;
 	u8 ret = _SUCCESS;
 	u8 cur_order = 0;
-	#ifdef CONFIG_RTL8822C
+	#if defined(CONFIG_RTL8822C) || defined(CONFIG_RTL8822E)
 	u16 dbg_reg[DBG_MCC_REG_NUM] = {0x4d4,0x522,0x1d70};
 	#else
 	u16 dbg_reg[DBG_MCC_REG_NUM] = {0x4d4,0x522,0xc50,0xe50};
@@ -3401,14 +3403,34 @@ u8 rtw_hal_set_mcc_setting_start_bss_network(PADAPTER padapter, u8 chbw_allow)
 	if (MCC_EN(padapter)) {
 		/* channel bw offset can not be allowed, start MCC */
 		if (chbw_allow == _FALSE) {
-				struct mcc_obj_priv *pmccobjpriv = &(adapter_to_dvobj(padapter)->mcc_objpriv);
+			struct mcc_obj_priv *pmccobjpriv = &(adapter_to_dvobj(padapter)->mcc_objpriv);
 
-				rtw_hal_mcc_restore_iqk_val(padapter);
-				_enter_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
-				ret = rtw_hal_set_mcc_setting(padapter, MCC_SETCMD_STATUS_START_CONNECT);
-				_exit_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
+			//rtw_hal_mcc_restore_iqk_val(padapter);
+			_enter_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
+			ret = rtw_hal_set_mcc_setting(padapter, MCC_SETCMD_STATUS_START_CONNECT);
+			_exit_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
+
+			if (ret == _FAIL) { /* MCC Start fail, AP/GO switch to buddy's channel */
+				u8 ch_to_set = 0, bw_to_set, offset_to_set;
+
+				rtw_hal_set_mcc_status(padapter, MCC_STATUS_NEED_MCC | MCC_STATUS_DOING_MCC);
+				rtw_hal_set_mcc_setting_disconnect(padapter);
+				if (rtw_mi_get_ch_setting_union_no_self(
+						padapter, &ch_to_set, &bw_to_set,
+						&offset_to_set) != 0) {
+					PHAL_DATA_TYPE  hal = GET_HAL_DATA(padapter);
+					u8 doiqk = _TRUE;
+
+					rtw_hal_set_hwreg(padapter, HW_VAR_DO_IQK, &doiqk);
+					hal->current_channel = 0;
+					hal->current_channel_bw = CHANNEL_WIDTH_MAX;
+					set_channel_bwmode(padapter, ch_to_set, offset_to_set, bw_to_set);
+					doiqk = _FALSE;
+					rtw_hal_set_hwreg(padapter, HW_VAR_DO_IQK, &doiqk);
+				}
 			}
 		}
+	}
 
 	return ret;
 }
@@ -3478,8 +3500,16 @@ u8 rtw_hal_set_mcc_setting_join_done_chk_ch(PADAPTER padapter)
 				_enter_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
 				ret = rtw_hal_set_mcc_setting(padapter, MCC_SETCMD_STATUS_START_CONNECT);
 				_exit_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
+
+				if (ret == _FAIL) { /* MCC Start Fail, then disconenct client join */
+					rtw_hal_set_mcc_status(padapter, MCC_STATUS_NEED_MCC | MCC_STATUS_DOING_MCC);
+					rtw_disassoc_cmd(padapter, 0, RTW_CMDF_DIRECTLY);
+					rtw_indicate_disconnect(padapter, 0, _FALSE);
+					rtw_free_assoc_resources(padapter, _TRUE);
+					rtw_free_network_queue(padapter, _TRUE);
+				}
+			}
 		}
-	}
 	}
 
 	return ret;

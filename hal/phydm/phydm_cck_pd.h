@@ -52,6 +52,7 @@
 /*@extend for different bw & path*/
 
 #define CCK_PD_IC_TYPE4 ODM_IC_JGR3_SERIES /*@extend for different bw & path*/
+#define CCK_PD_IC_TYPE5 (ODM_RTL8723F | ODM_RTL8735B | ODM_RTL8730A) /*@extend for different CR*/
 
 /*@Compile time flag of CCK_PD HW type*/
 #if (RTL8188E_SUPPORT || RTL8812A_SUPPORT || RTL8821A_SUPPORT ||\
@@ -73,6 +74,10 @@
 #ifdef PHYDM_IC_JGR3_SERIES_SUPPORT
 	#define PHYDM_COMPILE_CCKPD_TYPE4 /*@extend for different bw & path*/
 #endif
+#if (RTL8723F_SUPPORT || RTL8735B_SUPPORT || RTL8730A_SUPPORT)
+	#define PHYDM_COMPILE_CCKPD_TYPE5 /*@extend for different & path*/
+#endif
+
 /*@
  * 1 ============================================================
  * 1  enumeration
@@ -151,6 +156,7 @@ struct phydm_cckpd_struct {
 	u8		cck_cs_ratio_20m_2r;
 	u8		cck_cs_ratio_40m_1r;
 	u8		cck_cs_ratio_40m_2r;
+    u8		cck_din_shift_opt;
 	/*Current value*/
 	u8		cur_cck_pd_20m_1r;
 	u8		cur_cck_pd_20m_2r;
@@ -164,6 +170,10 @@ struct phydm_cckpd_struct {
 	#ifdef PHYDM_COMPILE_CCKPD_TYPE4
 	/*@[bw][nrx][0:PD/1:CS][lv]*/
 	u8		cckpd_jgr3[2][4][2][CCK_PD_LV_MAX];
+	#endif
+	#ifdef PHYDM_COMPILE_CCKPD_TYPE5
+	/*@[bw][nrx][0:PD/1:CS][lv]*/
+	u8		cck_pd_table_jgr3[2][4][2][CCK_PD_LV_MAX];
 	#endif
 };
 #endif

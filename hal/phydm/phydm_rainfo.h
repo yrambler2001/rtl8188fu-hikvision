@@ -26,8 +26,8 @@
 #ifndef __PHYDMRAINFO_H__
 #define __PHYDMRAINFO_H__
 
-/* 2019.12.24 Add ra mask c2h & h2c API*/
-#define RAINFO_VERSION "8.6"
+/* 2020.08.05 Fix ARFR bug due to rate_id error for 2.4G VHT mode*/
+#define RAINFO_VERSION "8.8"
 
 #define	FORCED_UPDATE_RAMASK_PERIOD	5
 
@@ -108,6 +108,16 @@ enum phydm_rateid_idx {
 	PHYDM_ARFR5_N_3SS	= 14,
 	PHYDM_ARFR7_N_4SS	= 15,
 	PHYDM_ARFR6_AC_4SS	= 16
+};
+
+/*ARFR4(0x49c/0x4a0) can not be used because FW BT would use.*/
+enum phydm_rateid_idx_type_2 {
+	PHYDM_TYPE2_AC_2SS		= 9,
+	PHYDM_TYPE2_AC_1SS		= 10,
+	PHYDM_TYPE2_MIX_1SS		= 11,
+	PHYDM_TYPE2_MIX_2SS		= 12,
+	PHYDM_TYPE2_ARFR3_AC_2G_2SS	= 16, /*0x494/0x498*/
+	PHYDM_TYPE2_ARFR5_AC_2G_1SS	= 18  /*0x4a4/0x4a8*/
 };
 
 enum phydm_qam_order {

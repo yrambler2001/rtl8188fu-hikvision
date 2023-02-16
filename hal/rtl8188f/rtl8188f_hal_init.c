@@ -3183,6 +3183,9 @@ void init_hal_spec_8188f(_adapter *adapter)
 	hal_spec->macid_cap = MACID_DROP_INDIRECT;
 	hal_spec->macid_txrpt = 0x8100;
 	hal_spec->macid_txrpt_pgsz = 16;
+#ifdef CONFIG_USB_HCI
+	hal_spec->mac_off_access_limit_in_low_clock = _TRUE;
+#endif /* CONFIG_USB_HCI */
 
 	hal_spec->rfpath_num_2g = 1;
 	hal_spec->rfpath_num_5g = 0;
@@ -3679,7 +3682,6 @@ Hal_InitPGData(
 		} else {
 			/* Read EFUSE real map to shadow. */
 			EFUSE_ShadowMapUpdate(padapter, EFUSE_WIFI, _FALSE);
-			_rtw_memcpy((void *)PROMContent, (void *)pHalData->efuse_eeprom_data, HWSET_MAX_SIZE_8188F);
 		}
 	} else {
 		/*autoload fail */
@@ -3687,7 +3689,6 @@ Hal_InitPGData(
 		/*update to default value 0xFF */
 		if (_FALSE == pHalData->EepromOrEfuse)
 			EFUSE_ShadowMapUpdate(padapter, EFUSE_WIFI, _FALSE);
-		_rtw_memcpy((void *)PROMContent, (void *)pHalData->efuse_eeprom_data, HWSET_MAX_SIZE_8188F);
 	}
 
 #ifdef CONFIG_EFUSE_CONFIG_FILE
@@ -3776,12 +3777,11 @@ Hal_EfuseParseChnlPlan_8188F(
 		BOOLEAN			AutoLoadFail
 )
 {
-	hal_com_config_channel_plan(
+	hal_com_parse_channel_plan(
 		padapter
 		, hwinfo ? &hwinfo[EEPROM_COUNTRY_CODE_8188F] : NULL
 		, hwinfo ? hwinfo[EEPROM_ChannelPlan_8188F] : 0xFF
-		, padapter->registrypriv.alpha2
-		, padapter->registrypriv.channel_plan
+		, RTW_CHPLAN_6G_NULL
 		, AutoLoadFail
 	);
 }
@@ -4760,28 +4760,12 @@ u8 SetHwReg8188F(PADAPTER padapter, u8 variable, u8 *val)
 		break;
 
 	case HW_VAR_RESP_SIFS:
-#if 0
-		/* SIFS for OFDM Data ACK */
-		rtw_write8(padapter, REG_SIFS_CTX + 1, val[0]);
-		/* SIFS for OFDM consecutive tx like CTS data! */
-		rtw_write8(padapter, REG_SIFS_TRX + 1, val[1]);
-
-		rtw_write8(padapter, REG_SPEC_SIFS + 1, val[0]);
-		rtw_write8(padapter, REG_MAC_SPEC_SIFS + 1, val[0]);
-
-		/* 20100719 Joseph: Revise SIFS setting due to Hardware register definition change. */
-		rtw_write8(padapter, REG_R2T_SIFS + 1, val[0]);
-		rtw_write8(padapter, REG_T2T_SIFS + 1, val[0]);
-
-#else
-		/*SIFS_Timer = 0x0a0a0808; */
-		/*RESP_SIFS for CCK */
-		rtw_write8(padapter, REG_RESP_SIFS_CCK, val[0]); /* SIFS_T2T_CCK (0x08) */
-		rtw_write8(padapter, REG_RESP_SIFS_CCK + 1, val[1]); /*SIFS_R2T_CCK(0x08) */
-		/*RESP_SIFS for OFDM */
-		rtw_write8(padapter, REG_RESP_SIFS_OFDM, val[2]); /*SIFS_T2T_OFDM (0x0a) */
-		rtw_write8(padapter, REG_RESP_SIFS_OFDM + 1, val[3]); /*SIFS_R2T_OFDM(0x0a) */
-#endif
+		#ifdef RTW_SIFS_IOT_BY_CORE
+		/*
+		* set IOT value here or restore to default value:
+		* hal_data->init_reg_0x428, init_reg_0x514, init_reg_0x63a, init_reg_0x63c
+		*/
+		#endif
 		break;
 
 	case HW_VAR_ACK_PREAMBLE: {
@@ -4939,6 +4923,7 @@ u8 SetHwReg8188F(PADAPTER padapter, u8 variable, u8 *val)
 					break;
 
 				RTW_INFO("%s: [HW_VAR_FIFO_CLEARN_UP] val=%x times:%d\n", __func__, val32, trycnt);
+				rtw_yield_os();
 			} while (--trycnt);
 			if (trycnt == 0)
 				RTW_INFO("[HW_VAR_FIFO_CLEARN_UP] Stop RX DMA failed......\n");
@@ -5051,11 +5036,7 @@ u8 SetHwReg8188F(PADAPTER padapter, u8 variable, u8 *val)
 	}
 	break;
 #endif
-#if defined(CONFIG_TDLS) && defined(CONFIG_TDLS_CH_SW)
-	case HW_VAR_TDLS_BCN_EARLY_C2H_RPT:
-		rtl8188f_set_BcnEarly_C2H_Rpt_cmd(padapter, *val);
-		break;
-#endif
+
 	default:
 		ret = SetHwReg(padapter, variable, val);
 		break;

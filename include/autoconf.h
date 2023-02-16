@@ -100,8 +100,6 @@
 	/* #define DBG_RUNTIME_PORT_SWITCH */
 #endif /* CONFIG_CONCURRENT_MODE */
 
-#define CONFIG_LAYER2_ROAMING
-#define CONFIG_LAYER2_ROAMING_RESUME
 
 /*
  * Hareware/Firmware Related Configure
@@ -216,12 +214,11 @@
 
 #ifdef CONFIG_POWER_SAVING
 #define CONFIG_IPS
-#define CONFIG_LPS
-
 #ifdef CONFIG_IPS
-/* #define CONFIG_IPS_LEVEL_2	1  */ /*enable this to set default IPS mode to IPS_LEVEL_2 */
-#endif
+	/* #define CONFIG_FWLPS_IN_IPS */
+#endif /* CONFIG_IPS */
 
+#define CONFIG_LPS
 #if defined(CONFIG_LPS)
 	#define CONFIG_LPS_LCLK
 #endif
@@ -269,6 +266,7 @@
 	#define CONFIG_PREALLOC_RECV_SKB
 	#ifdef CONFIG_PREALLOC_RECV_SKB
 		/* #define CONFIG_FIX_NR_BULKIN_BUFFER */ /* only use PREALLOC_RECV_SKB buffer, don't alloc skb at runtime */
+		#define CONFIG_USB_PROTECT_RX_CLONED_SKB
 	#endif
 #endif
 

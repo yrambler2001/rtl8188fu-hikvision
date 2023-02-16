@@ -3,3 +3,4 @@ config RTL8188FU
 	depends on USB
 	---help---
 	  Help message of RTL8818FU
+

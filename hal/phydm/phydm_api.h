@@ -133,7 +133,7 @@ u8 phydm_stop_ic_trx(void *dm_void, u8 set_type);
 
 void phydm_dis_cck_trx(void *dm_void, u8 set_type);
 
-void phydm_bw_fixed_enable(void *dm_void, boolean enable);
+void phydm_bw_fixed_enable(void *dm_void, u8 enable);
 
 void phydm_bw_fixed_setting(void *dm_void);
 
@@ -160,6 +160,7 @@ phydm_set_bb_txagc_offset(void *dm_void, s8 power_offset, u8 add_half_db);
 
 boolean phydm_spur_case_mapping(void *dm_void);
 
+enum odm_rf_band phydm_ch_to_rf_band(void *dm_void, u8 central_ch);
 #ifdef PHYDM_IC_JGR3_SERIES_SUPPORT
 u32 phydm_rf_psd_jgr3(void *dm_void, u8 path, u32 tone_idx);
 
@@ -195,7 +196,7 @@ phydm_api_set_txagc(void *dm_void, u32 power_index, enum rf_path path,
 
 u8 phydm_api_get_txagc(void *dm_void, enum rf_path path, u8 hw_rate);
 
-#if (RTL8822C_SUPPORT)
+#if (RTL8822C_SUPPORT || RTL8822E_SUPPORT)
 void phydm_shift_rxagc_table(void *dm_void, boolean shift_up, u8 shift);
 #endif
 

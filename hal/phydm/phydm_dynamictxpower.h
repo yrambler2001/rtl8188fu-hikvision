@@ -32,7 +32,7 @@
  * ============================================================
  */
 
-/* 2019.6.14, Modify per sta API to fix the AP problem of early return*/
+/* 2020.6.23, Let gain_idx be initialized to 0 for linux compile warning*/
 #define DYNAMIC_TXPWR_VERSION "2.1"
 
 #define DTP_POWER_LEVEL_SIZE 3

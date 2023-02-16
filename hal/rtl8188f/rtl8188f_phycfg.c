@@ -164,7 +164,7 @@ phy_RFSerialRead_8188F(
 {
 	u32						retValue = 0;
 	HAL_DATA_TYPE				*pHalData = GET_HAL_DATA(Adapter);
-	BB_REGISTER_DEFINITION_T	*pPhyReg = &pHalData->PHYRegDef[eRFPath];
+	BB_REGISTER_DEFINITION_T *pPhyReg = &pHalData->PHYRegDef[eRFPath];
 	u32						NewOffset;
 	u32						tmplong, tmplong2;
 	u8					RfPiEnable = 0;
@@ -329,6 +329,10 @@ PHY_QueryRFReg_8188F(
 {
 	u32 Original_Value, Readback_Value, BitShift;
 
+	if (eRFPath >= MAX_RF_PATH)
+		return 0;
+
+
 #if (DISABLE_BB_RF == 1)
 	return 0;
 #endif
@@ -369,6 +373,9 @@ PHY_SetRFReg_8188F(
 )
 {
 	u32		Original_Value, BitShift;
+
+	 if (eRFPath >= MAX_RF_PATH)
+		return;
 
 #if (DISABLE_BB_RF == 1)
 	return;
@@ -424,6 +431,27 @@ s32 PHY_MACConfig8188F(PADAPTER Adapter)
 		rtStatus = _SUCCESS;
 #endif/*CONFIG_EMBEDDED_FWIMG */
 	}
+
+#ifdef RTW_SIFS_INIT_BY_CORE
+	/* Set Spec SIFS (used in NAV) */
+	rtw_write16(Adapter, REG_SPEC_SIFS, 0x100a);
+	rtw_write16(Adapter, REG_MAC_SPEC_SIFS, 0x100a);
+
+	/* Set SIFS for CCK */
+	rtw_write16(Adapter, REG_SIFS_CTX, 0x100a);
+
+	/* Set SIFS for OFDM */
+	rtw_write16(Adapter, REG_SIFS_TRX, 0x100a);
+
+	/* RESP_SIFS for CCK */
+	rtw_write8(Adapter, REG_RESP_SIFS_CCK, 0x08); /* SIFS_T2T_CCK (0x08) */
+	rtw_write8(Adapter, REG_RESP_SIFS_CCK + 1, 0x08); /*SIFS_R2T_CCK(0x08) */
+	/* RESP_SIFS for OFDM */
+	rtw_write8(Adapter, REG_RESP_SIFS_OFDM, 0x0a); /* SIFS_T2T_OFDM (0x0a) */
+	rtw_write8(Adapter, REG_RESP_SIFS_OFDM + 1, 0x0a); /* SIFS_R2T_OFDM(0x0a) */
+#endif
+
+	rtw_hal_init_sifs_backup(Adapter);
 
 	return rtStatus;
 }
@@ -1192,8 +1220,8 @@ PHY_HandleSwChnlAndSetBW8188F(
 		BOOLEAN				bSetBandWidth,
 		u8					ChannelNum,
 		enum channel_width	ChnlWidth,
-		EXTCHNL_OFFSET	ExtChnlOffsetOf40MHz,
-		EXTCHNL_OFFSET	ExtChnlOffsetOf80MHz,
+		u8					ExtChnlOffsetOf40MHz,
+		u8					ExtChnlOffsetOf80MHz,
 		u8					CenterFrequencyIndex1
 )
 {

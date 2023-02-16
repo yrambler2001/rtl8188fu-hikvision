@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2007 - 2019 Realtek Corporation.
+ * Copyright(c) 2007 - 2021 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -117,7 +117,7 @@ extern uint rtw_drv_log_level;
 
 #ifdef DBG_CPU_INFO
 #define CPU_INFO_FMT	"[%u] "
-#define CPU_INFO_ARG	get_cpu()
+#define CPU_INFO_ARG	task_cpu(current)
 #else /* !DBG_CPU_INFO */
 #define CPU_INFO_FMT	"%s"
 #define CPU_INFO_ARG	""
@@ -387,6 +387,8 @@ ssize_t proc_set_ap_linking_test(struct file *file, const char __user *buffer, s
 
 int proc_get_rx_stat(struct seq_file *m, void *v);
 int proc_get_tx_stat(struct seq_file *m, void *v);
+int proc_get_sta_tx_stat(struct seq_file *m, void *v);
+ssize_t proc_set_sta_tx_stat(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
 #ifdef CONFIG_AP_MODE
 int proc_get_all_sta_info(struct seq_file *m, void *v);
 #endif /* CONFIG_AP_MODE */
@@ -535,7 +537,28 @@ int proc_get_wakeup_event(struct seq_file *m, void *v);
 ssize_t proc_set_wakeup_event(struct file *file, const char __user *buffer,
 		size_t count, loff_t *pos, void *data);
 int proc_get_wakeup_reason(struct seq_file *m, void *v);
+#ifdef CONFIG_WOW_KEEP_ALIVE_PATTERN
+int proc_dump_wow_keep_alive_info(struct seq_file *m, void *v);
+#endif /*CONFIG_WOW_KEEP_ALIVE_PATTERN*/
 #endif
+
+#ifdef CONFIG_WAR_OFFLOAD
+int proc_get_war_offload_enable(struct seq_file *m, void *v);
+ssize_t proc_set_war_offload_enable(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
+int proc_get_war_offload_ipv4_addr(struct seq_file *m, void *v);
+ssize_t proc_set_war_offload_ipv4_addr(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
+int proc_get_war_offload_ipv6_addr(struct seq_file *m, void *v);
+ssize_t proc_set_war_offload_ipv6_addr(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
+int proc_get_war_offload_mdns_domain_name(struct seq_file *m, void *v);
+ssize_t proc_set_war_offload_mdns_domain_name(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
+int proc_get_war_offload_mdns_machine_name(struct seq_file *m, void *v);
+ssize_t proc_set_war_offload_mdns_machine_name(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
+int proc_get_war_offload_mdns_txt_rsp(struct seq_file *m, void *v);
+ssize_t proc_set_war_offload_mdns_txt_rsp(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
+int proc_get_war_offload_mdns_service_info(struct seq_file *m, void *v);
+ssize_t proc_set_war_offload_mdns_service_info(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
+#endif /* CONFIG_WAR_OFFLOAD */
+
 
 #ifdef CONFIG_GPIO_WAKEUP
 int proc_get_wowlan_gpio_info(struct seq_file *m, void *v);
@@ -657,6 +680,11 @@ int proc_get_smps(struct seq_file *m, void *v);
 
 int proc_get_defs_param(struct seq_file *m, void *v);
 ssize_t proc_set_defs_param(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
+
+#if defined(CONFIG_CONCURRENT_MODE) && defined(CONFIG_AP_MODE)
+ssize_t proc_set_ap_csa_cnt(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
+int proc_get_ap_csa_cnt(struct seq_file *m, void *v);
+#endif
 
 #define _drv_always_		1
 #define _drv_emerg_			2

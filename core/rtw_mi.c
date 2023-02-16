@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2007 - 2019 Realtek Corporation.
+ * Copyright(c) 2007 - 2021 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -20,11 +20,15 @@
 void rtw_mi_update_union_chan_inf(_adapter *adapter, u8 ch, u8 offset , u8 bw)
 {
 	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
-	struct mi_state *iface_state = &dvobj->iface_state;
 
-	iface_state->union_ch = ch;
-	iface_state->union_bw = bw;
-	iface_state->union_offset = offset;
+	if (!ch) {
+		dvobj->union_ch_bak = dvobj->union_ch;
+		dvobj->union_bw_bak = dvobj->union_bw;
+		dvobj->union_offset_bak = dvobj->union_offset;
+	}
+	dvobj->union_ch = ch;
+	dvobj->union_bw = bw;
+	dvobj->union_offset = offset;
 }
 
 #ifdef DBG_IFACE_STATUS
@@ -183,7 +187,38 @@ inline int rtw_mi_get_ch_setting_union_no_self(_adapter *adapter, u8 *ch, u8 *bw
 	return rtw_mi_get_ch_setting_union_by_ifbmp(adapter_to_dvobj(adapter), 0xFF & ~BIT(adapter->iface_id), ch, bw, offset);
 }
 
-/* For now, not return union_ch/bw/offset */
+int rtw_mi_get_bch_setting_union_by_hwband(struct dvobj_priv *dvobj, u8 band_idx
+	, enum band_type *band, u8 *ch, u8 *bw, u8 *offset)
+{
+	/* this driver has only one hwband and 2G/5G only */
+	int ret = rtw_mi_get_ch_setting_union_by_ifbmp(dvobj, 0xFF, ch, bw, offset);
+
+	if (band) {
+		if (ret && ch)
+			*band = rtw_is_2g_ch(*ch) ? BAND_ON_24G : BAND_ON_5G;
+		else
+			*band = BAND_MAX;
+	}
+
+	return ret;
+}
+
+int rtw_mi_get_bch_setting_union_by_hwband_ifbmp(struct dvobj_priv *dvobj, u8 band_idx, u8 ifbmp
+	, enum band_type *band, u8 *ch, u8 *bw, u8 *offset)
+{
+	/* this driver has only one hwband and 2G/5G only */
+	int ret = rtw_mi_get_ch_setting_union_by_ifbmp(dvobj, ifbmp, ch, bw, offset);
+
+	if (band) {
+		if (ret && ch)
+			*band = rtw_is_2g_ch(*ch) ? BAND_ON_24G : BAND_ON_5G;
+		else
+			*band = BAND_MAX;
+	}
+
+	return ret;
+}
+
 void rtw_mi_status_by_ifbmp(struct dvobj_priv *dvobj, u8 ifbmp, struct mi_state *mstate)
 {
 	_adapter *iface;
@@ -286,7 +321,18 @@ inline void rtw_mi_status_no_others(_adapter *adapter, struct mi_state *mstate)
 	return rtw_mi_status_by_ifbmp(adapter_to_dvobj(adapter), BIT(adapter->iface_id), mstate);
 }
 
-/* For now, not handle union_ch/bw/offset */
+void rtw_mi_status_by_hwband(struct dvobj_priv *dvobj, u8 band_idx, struct mi_state *mstate)
+{
+	/* this driver has only one hwband, bypass band_idx */
+	rtw_mi_status_by_ifbmp(dvobj, 0xFF, mstate);
+}
+
+void rtw_mi_status_by_hwband_ifbmp(struct dvobj_priv *dvobj, u8 band_idx, u8 ifbmp, struct mi_state *mstate)
+{
+	/* this driver has only one hwband, bypass band_idx */
+	rtw_mi_status_by_ifbmp(dvobj, ifbmp, mstate);
+}
+
 inline void rtw_mi_status_merge(struct mi_state *d, struct mi_state *a)
 {
 	d->sta_num += a->sta_num;
@@ -367,7 +413,6 @@ inline void rtw_mi_update_iface_status(struct mlme_priv *pmlmepriv, sint state)
 	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
 	struct mi_state *iface_state = &dvobj->iface_state;
 	struct mi_state tmp_mstate;
-	u8 u_ch, u_offset, u_bw;
 
 	if (state == WIFI_MONITOR_STATE
 		|| state == 0xFFFFFFFF
@@ -379,16 +424,6 @@ inline void rtw_mi_update_iface_status(struct mlme_priv *pmlmepriv, sint state)
 
 	rtw_mi_status(adapter, &tmp_mstate);
 	_rtw_memcpy(iface_state, &tmp_mstate, sizeof(struct mi_state));
-
-	if (rtw_mi_get_ch_setting_union(adapter, &u_ch, &u_bw, &u_offset))
-		rtw_mi_update_union_chan_inf(adapter , u_ch, u_offset , u_bw);
-	else {
-		if (0) {
-			dump_adapters_status(RTW_DBGDUMP , dvobj);
-			RTW_INFO("%s-[ERROR] cannot get union channel\n", __func__);
-			rtw_warn_on(1);
-		}
-	}
 
 #ifdef DBG_IFACE_STATUS
 	DBG_IFACE_STATUS_DUMP(adapter);
@@ -841,6 +876,20 @@ void rtw_mi_buddy_beacon_update(_adapter *padapter)
 {
 	_rtw_mi_process(padapter, _TRUE, NULL, _rtw_mi_beacon_update);
 }
+
+static u8 _rtw_mi_update_csa(_adapter *adapter, void *data)
+{
+	struct rf_ctl_t *rfctl = adapter_to_rfctl(adapter);
+	
+	if (check_fwstate(&adapter->mlmepriv, WIFI_AP_STATE) == _TRUE)
+		_update_beacon(adapter, WLAN_EID_CHANNEL_SWITCH, NULL, _TRUE, 0, "update CSA count");
+	return _TRUE;
+}
+
+void rtw_mi_update_csa(_adapter *adapter)
+{
+	_rtw_mi_process(adapter, _FALSE, NULL, _rtw_mi_update_csa);
+}
 #endif /* CONFIG_AP_MODE */
 
 #ifndef CONFIG_MI_WITH_MBSSID_CAM
@@ -982,6 +1031,14 @@ u8 rtw_mi_buddy_check_fwstate(_adapter *padapter, sint state)
 	sint in_data = state;
 
 	return _rtw_mi_process(padapter, _TRUE, &in_data, _rtw_mi_check_fwstate);
+}
+
+u8 rtw_mi_check_fwstate_by_hwband(struct dvobj_priv *dvobj, u8 band_idx, sint state)
+{
+	sint in_data = state;
+
+	/* this driver has only one hwband, bypass band_idx */
+	return _rtw_mi_process(dvobj_get_primary_adapter(dvobj), _FALSE, &in_data, _rtw_mi_check_fwstate);
 }
 
 static u8 _rtw_mi_traffic_statistics(_adapter *padapter , void *data)
@@ -1328,11 +1385,12 @@ _adapter *rtw_get_iface_by_hwport(_adapter *padapter, u8 hw_port)
 #ifdef DBG_SKB_PROCESS
 void rtw_dbg_skb_process(_adapter *padapter, union recv_frame *precvframe, union recv_frame *pcloneframe)
 {
+	/*
 	_pkt *pkt_copy, *pkt_org;
 
 	pkt_org = precvframe->u.hdr.pkt;
 	pkt_copy = pcloneframe->u.hdr.pkt;
-	/*
+
 		RTW_INFO("%s ===== ORG SKB =====\n", __func__);
 		RTW_INFO(" SKB head(%p)\n", pkt_org->head);
 		RTW_INFO(" SKB data(%p)\n", pkt_org->data);
@@ -1377,8 +1435,8 @@ static s32 _rtw_mi_buddy_clone_bcmc_packet(_adapter *adapter, union recv_frame *
 	s32 ret = _SUCCESS;
 #ifdef CONFIG_SKB_ALLOCATED
 	u8 *pbuf = precvframe->u.hdr.rx_data;
-#endif
 	struct rx_pkt_attrib *pattrib = NULL;
+#endif
 
 	if (pcloneframe) {
 		pcloneframe->u.hdr.adapter = adapter;
@@ -1389,8 +1447,8 @@ static s32 _rtw_mi_buddy_clone_bcmc_packet(_adapter *adapter, union recv_frame *
 
 		_rtw_memcpy(&pcloneframe->u.hdr.attrib, &precvframe->u.hdr.attrib, sizeof(struct rx_pkt_attrib));
 
-		pattrib = &pcloneframe->u.hdr.attrib;
 #ifdef CONFIG_SKB_ALLOCATED
+		pattrib = &pcloneframe->u.hdr.attrib;
 		if (rtw_os_alloc_recvframe(adapter, pcloneframe, pbuf, NULL) == _SUCCESS)
 #else
 		if (rtw_os_recvframe_duplicate_skb(adapter, pcloneframe, precvframe->u.hdr.pkt) == _SUCCESS)
@@ -1473,6 +1531,41 @@ _adapter *rtw_mi_get_ap_adapter(_adapter *padapter)
 }
 #endif
 
+u8 rtw_mi_get_ifbmp_by_hwband(struct dvobj_priv *dvobj, u8 band_idx)
+{
+	int i;
+	_adapter *iface;
+	u8 ifbmp = 0;
+
+	for (i = 0; i < dvobj->iface_nums; i++) {
+		iface = dvobj->padapters[i];
+		if (!iface)
+			continue;
+		#if 0 /* this driver has only one hwband, bypass band_idx */
+		if (!rtw_iface_is_operate_at_hwband(iface, band_idx))
+			continue;
+		#endif
+		ifbmp |= BIT(i);
+	}
+
+	return ifbmp;
+}
+
+_adapter *rtw_mi_get_iface_by_hwband(struct dvobj_priv *dvobj, u8 band_idx)
+{
+	u8 ifbmp = rtw_mi_get_ifbmp_by_hwband(dvobj, band_idx);
+
+	if (ifbmp) {
+		int i;
+
+		for (i = 0; i < dvobj->iface_nums; i++) {
+			if ((ifbmp & BIT(i)) && dvobj->padapters[i])
+				return dvobj->padapters[i];
+		}
+	}
+	return NULL;
+}
+
 u8 rtw_mi_get_ld_sta_ifbmp(_adapter *adapter)
 {
 	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
@@ -1490,6 +1583,12 @@ u8 rtw_mi_get_ld_sta_ifbmp(_adapter *adapter)
 	}
 
 	return ifbmp;
+}
+
+u8 rtw_mi_get_ld_sta_ifbmp_by_hwband(struct dvobj_priv *dvobj, u8 band_idx)
+{
+	/* this driver has only one hwband, bypass band_idx */
+	return rtw_mi_get_ld_sta_ifbmp(dvobj_get_primary_adapter(dvobj));
 }
 
 u8 rtw_mi_get_ap_mesh_ifbmp(_adapter *adapter)
@@ -1510,6 +1609,33 @@ u8 rtw_mi_get_ap_mesh_ifbmp(_adapter *adapter)
 	}
 
 	return ifbmp;
+}
+
+u8 rtw_mi_get_ap_mesh_ifbmp_by_hwband(struct dvobj_priv *dvobj, u8 band_idx)
+{
+	/* this driver has only one hwband, bypass band_idx */
+	return rtw_mi_get_ap_mesh_ifbmp(dvobj_get_primary_adapter(dvobj));
+}
+
+_adapter *rtw_mi_get_ap_mesh_iface_by_hwband(struct dvobj_priv *dvobj, u8 band_idx)
+{
+	u8 ifbmp = rtw_mi_get_ap_mesh_ifbmp_by_hwband(dvobj, band_idx);
+
+	if (ifbmp) {
+		int i;
+
+		for (i = 0; i < dvobj->iface_nums; i++) {
+			if ((ifbmp & BIT(i)) && dvobj->padapters[i])
+				return dvobj->padapters[i];
+		}
+	}
+	return NULL;
+}
+
+bool rtw_iface_is_operate_at_hwband(_adapter *adapter, u8 band_idx)
+{
+	/* this driver has only one hwband */
+	return band_idx < HW_BAND_MAX ? true : false;
 }
 
 void rtw_mi_update_ap_bmc_camid(_adapter *padapter, u8 camid_a, u8 camid_b)
@@ -1552,4 +1678,23 @@ u8 rtw_mi_get_assoc_if_num(_adapter *adapter)
 	n_assoc_iface = DEV_STA_LD_NUM(dvobj) + DEV_AP_NUM(dvobj) + DEV_ADHOC_NUM(dvobj) + DEV_MESH_NUM(dvobj);
 #endif
 	return n_assoc_iface;
+}
+
+_adapter *rtw_mi_get_linking_adapter(_adapter *adapter)
+{
+	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
+	_adapter *iface = NULL;
+	u8 i;
+
+	for (i = 0; i < dvobj->iface_nums; i++) {
+		iface = dvobj->padapters[i];
+		if (!iface)
+			continue;
+
+		if (check_fwstate(&iface->mlmepriv, WIFI_UNDER_LINKING) == _TRUE)
+			break;
+
+		iface = NULL;
+	}
+	return iface;
 }
