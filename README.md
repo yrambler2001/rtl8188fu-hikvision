@@ -259,6 +259,11 @@ docker exec fuv sh /src/build/build-vendorpath.sh
 python3 build/fulldiff.py /path/to/original/8188fu.ko ./8188fu.ko --brief
 ```
 
+`build/verify.sh` does steps 6 and 7 from a **clean `git archive` of HEAD**,
+builds twice to check determinism, and prints the scoreboard, both SHA-256
+hashes and `cmp`. That export reproduces the same bytes as the working tree, so
+nothing the build needs is untracked.
+
 Step 6 is the whole recipe in one script: it copies the tree to
 `/data1/jiangqifeng6/work/tongyibianyi/develop_branch/wifi/rtl8188FU_linux_v5.15.3-6-g1a2e952f9.20230217`,
 sets `-D__DATE__='"Dec 25 2023"' -D__TIME__='"20:43:27"'
