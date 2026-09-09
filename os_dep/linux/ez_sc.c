@@ -391,11 +391,11 @@ int ez_probe_requst_eid208_handler(u8 *pframe, int len)
 		if (!err_status)
 			return 0;
 
-		tlv.value = err_status;
 		probe_resp_t.element_len += 4;
 		probe_resp_t.id = 0x6993;
 		tlv.id = 0x6994;
 		tlv.len = 1;
+		tlv.value = err_status;
 		memcpy(&probe_resp_t.value[probe_resp_t.len], &tlv, sizeof(tlv));
 	}
 
