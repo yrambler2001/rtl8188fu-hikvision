@@ -47,11 +47,21 @@
 # result: /opt/gcc-6.5.0-vendor/arm-linux-gnueabi/bin/arm-linux-gnueabi-gcc
 set -e
 
-TARGET=arm-linux-gnueabi
+# Set before sourcing build/toolchain-env.sh: it derives $VENDOR_GCC_DIR from it.
 GCC_VER=${GCC_VER:-6.5.0}
+
+# build/toolchain-env.sh is the single place that knows where each toolchain
+# lives, so this script and the ones that consume its output cannot drift, and
+# so this script runs correctly in a fresh shell rather than only inside
+# build/Dockerfile's image.  It also puts the crosstool prebuilt on PATH, which
+# is where the container has it while this build runs.
+_here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "${TOOLCHAIN_ENV:-$_here/toolchain-env.sh}"
+
+TARGET=$TOOLCHAIN_TARGET
 PKGVERSION=${PKGVERSION:-arm_multilib_uclibc_20200924}
-STOCK=${STOCK:-/opt/gcc-6.5.0-nolibc/$TARGET}
-PREFIX=${PREFIX:-/opt/gcc-6.5.0-vendor/$TARGET}
+STOCK=${STOCK:-$CROSSTOOL_DIR}
+PREFIX=${PREFIX:-$VENDOR_GCC_DIR}
 WORK=${WORK:-/build/gcc-vendor}
 JOBS=${JOBS:-$(nproc)}
 INFRA=https://gcc.gnu.org/pub/gcc/infrastructure
@@ -78,7 +88,10 @@ HOST_CXX=${HOST_CXX:-$NATIVE_PFX-g++}
 command -v "$HOST_CC"  >/dev/null 2>&1 || HOST_CC=gcc
 command -v "$HOST_CXX" >/dev/null 2>&1 || HOST_CXX=g++
 
-[ -x "$STOCK/bin/$TARGET-as" ] || { echo "!! no stock binutils at $STOCK" >&2; exit 1; }
+[ -x "$STOCK/bin/$TARGET-as" ] || {
+    echo "!! no stock binutils at $STOCK" >&2
+    echo "!! run: sh build/setup-toolchain.sh" >&2
+    exit 1; }
 
 echo "=== target      $TARGET"
 echo "=== pkgversion  $PKGVERSION"

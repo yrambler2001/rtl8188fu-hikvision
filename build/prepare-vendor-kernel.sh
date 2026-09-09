@@ -5,6 +5,25 @@
 # We only need headers + Module.symvers machinery, not a bootable kernel.
 set -e
 
+# The toolchain.  modules_prepare compiles arch/arm/kernel/asm-offsets.c and
+# runs scripts/gcc-version.sh, so it needs a cross compiler on PATH - and in a
+# fresh shell (a GitHub Actions step, say) there is none, which is what used to
+# break this script in CI with "arm-linux-gnueabi-gcc: command not found".
+# Establish it here rather than relying on the caller.
+#
+# Which compiler: the stock kernel.org crosstool, deliberately, and not the
+# vendor-pkgversion GCC that the *module* is built with.  Nothing modules_prepare
+# produces depends on the choice - the two are the same compiler apart from a
+# string that only reaches .comment - but it has to be the same choice
+# everywhere, and the container has only the crosstool on PATH.  Override with
+# KERNEL_TOOLCHAIN_BIN to use another.
+_here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "${TOOLCHAIN_ENV:-$_here/toolchain-env.sh}"
+KERNEL_TOOLCHAIN_BIN=${KERNEL_TOOLCHAIN_BIN:-$CROSSTOOL_BIN}
+toolchain_require "$KERNEL_TOOLCHAIN_BIN" \
+    "the kernel is configured with the stock crosstool prebuilt" \
+    "sh build/setup-toolchain.sh"
+
 # VENDOR_SRC is the pristine tree; KSRC is where it is configured.  They differ
 # by default because kbuild writes .config, autoconf.h, include/generated/* and
 # host binaries all over the source directory, and the bind-mounted host tree
@@ -22,7 +41,7 @@ if [ "$KSRC" = "$VENDOR_SRC" ]; then VENDOR_COPY=0; fi
 # GCC 10+ host tools: 4.9's scripts/ assume -fcommon and gnu89. Keep HOSTCFLAGS
 # a single quoted word so `make` sees one argument.
 kmake() {
-    make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- HOSTCFLAGS="$HOSTCFLAGS" "$@"
+    make ARCH=arm CROSS_COMPILE="$TOOLCHAIN_TARGET-" HOSTCFLAGS="$HOSTCFLAGS" "$@"
 }
 
 if [ "$VENDOR_COPY" = 1 ] && [ ! -d "$KSRC" ]; then
@@ -42,6 +61,8 @@ if [ ! -d "$KSRC/arch/arm/mach-fh" ]; then
 fi
 
 cd "$KSRC"
+
+echo "== cc  $("$TOOLCHAIN_TARGET-gcc" --version | head -1)  [$KERNEL_TOOLCHAIN_BIN]"
 
 # ---------------------------------------------------------------------------
 # Retarget the board from ARMv6 to ARMv7.

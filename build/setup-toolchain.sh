@@ -19,8 +19,18 @@
 # stock compiler to diff the rebuilt one against.
 set -e
 
-PREFIX=${PREFIX:-/opt}
+# Set before sourcing build/toolchain-env.sh: it derives $CROSSTOOL_DIR from it.
 CROSSTOOL_VER=${CROSSTOOL_VER:-6.5.0}
+
+# build/toolchain-env.sh owns the install prefix ($CROSSTOOL_DIR) and the PATH
+# rule, so that this script, build/prepare-vendor-kernel.sh and the module
+# build cannot disagree about where the compiler is.  Sourced before anything
+# else runs, and resolved from this script's own directory so that it works
+# whether it is invoked as build/setup-toolchain.sh, /tmp/setup-toolchain.sh
+# (build/Dockerfile) or by absolute path.
+_here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "${TOOLCHAIN_ENV:-$_here/toolchain-env.sh}"
+
 SKIP_APT=${SKIP_APT:-0}
 
 # Pin the host packages to a fixed point in Debian's archive.
@@ -75,15 +85,21 @@ SRCLIST
     rm -rf /var/lib/apt/lists/*
 fi
 
-CT_DIR="$PREFIX/gcc-$CROSSTOOL_VER-nolibc/arm-linux-gnueabi"
-if [ -x "$CT_DIR/bin/arm-linux-gnueabi-gcc" ]; then
-    echo "== crosstool already installed at $CT_DIR"
+if [ -x "$CROSSTOOL_BIN/$TOOLCHAIN_TARGET-gcc" ]; then
+    echo "== crosstool already installed at $CROSSTOOL_DIR"
 else
-    url="https://mirrors.edge.kernel.org/pub/tools/crosstool/files/bin/$CT_HOST/$CROSSTOOL_VER/$CT_HOST-gcc-$CROSSTOOL_VER-nolibc-arm-linux-gnueabi.tar.xz"
+    url="https://mirrors.edge.kernel.org/pub/tools/crosstool/files/bin/$CT_HOST/$CROSSTOOL_VER/$CT_HOST-gcc-$CROSSTOOL_VER-nolibc-$TOOLCHAIN_TARGET.tar.xz"
     echo "== fetching $url"
-    mkdir -p "$PREFIX"
-    curl -fsSL --retry 3 "$url" | tar -C "$PREFIX" -xJ
+    mkdir -p "$TOOLCHAIN_ROOT"
+    curl -fsSL --retry 3 "$url" | tar -C "$TOOLCHAIN_ROOT" -xJ
 fi
 
-"$CT_DIR/bin/arm-linux-gnueabi-gcc" --version | head -1
-"$CT_DIR/bin/arm-linux-gnueabi-as"  --version | head -1
+# Put it on PATH here as well as reporting it, so that a caller that sources
+# this script - rather than running it - comes out with a usable environment.
+toolchain_require "$CROSSTOOL_BIN" \
+    "kernel.org crosstool prebuilt" \
+    "sh build/setup-toolchain.sh"
+
+"$CROSSTOOL_BIN/$TOOLCHAIN_TARGET-gcc" --version | head -1
+"$CROSSTOOL_BIN/$TOOLCHAIN_TARGET-as"  --version | head -1
+echo "== PATH now begins $CROSSTOOL_BIN"

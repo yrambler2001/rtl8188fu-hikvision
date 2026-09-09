@@ -486,6 +486,19 @@ the current environment instead of through `docker exec`, which is what CI does
 — `.github/workflows/reproduce.yml` runs this very script, so what the badge
 checks and what you can check locally are one recipe, not two.
 
+That only works if the scripts carry their own environment, and they do. Every
+`build/*.sh` sources `build/toolchain-env.sh`, which is the one place that says
+where the two GCC 6.5.0 installations are and which is for what: the stock
+kernel.org crosstool at `/opt/gcc-6.5.0-nolibc` configures the kernel, and the
+`--with-pkgversion` rebuild at `/opt/gcc-6.5.0-vendor` builds the module, where
+a wrong choice would not fail — it would produce a plausible module with the
+wrong `.comment` and the wrong hash, so a missing compiler is an error and never
+a fallback. Each script therefore runs correctly in a fresh shell with nothing
+inherited, which is what a GitHub Actions step is: they were previously relying
+on the `PATH` that `build/Dockerfile` sets, and `modules_prepare` failed in CI
+with `arm-linux-gnueabi-gcc: command not found` in the step after the one that
+installed that compiler.
+
 So: a clean `git archive` of HEAD reproduces the shipped module bit for bit;
 two consecutive builds of that checkout are byte-identical to each other, so
 nothing in the build is non-deterministic; and nothing the build needs is
@@ -536,6 +549,7 @@ Makefile                                the recovered vendor configuration
 LICENSE                                 GPL v2 (see section 8)
 build/
   Dockerfile, Dockerfile.vendor         the two build images
+  toolchain-env.sh                      where each toolchain lives; sourced by all of the below
   setup-toolchain.sh                    prerequisites + crosstool; shared with CI
   fetch-vendor-kernel.sh                OpenIPC/linux @ 6bde37dba95d, one commit
   prepare-vendor-kernel.sh              vendor kernel tree -> modules_prepare

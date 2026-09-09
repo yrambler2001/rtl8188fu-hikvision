@@ -31,24 +31,33 @@
 # usage: docker exec fuv sh /src/build/build-vendorpath.sh [make args]
 set -e
 
+# build/toolchain-env.sh puts the crosstool prebuilt on PATH - the environment
+# build/Dockerfile's ENV line gives locally, and which a fresh GitHub Actions
+# step does not - and names the compiler this build has to use.  Sourced from
+# this script's own directory, before the cd below.
+_here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "${TOOLCHAIN_ENV:-$_here/toolchain-env.sh}"
+
 VENDOR_ROOT=${VENDOR_ROOT:-/data1/jiangqifeng6/work/tongyibianyi/develop_branch/wifi/rtl8188FU_linux_v5.15.3-6-g1a2e952f9.20230217}
 : "${SRC:=/src}"
 : "${KSRC:=/build/linux-vendor}"
 : "${BUILD_DATE:=Dec 25 2023}"
 : "${BUILD_TIME:=20:43:27}"
 
-: "${TOOLCHAIN_BIN:=/opt/gcc-6.5.0-vendor/arm-linux-gnueabi/bin}"
-if [ -x "$TOOLCHAIN_BIN/arm-linux-gnueabi-gcc" ]; then
-    PATH="$TOOLCHAIN_BIN:$PATH"
-    export PATH
-else
-    echo "!! no compiler at $TOOLCHAIN_BIN; falling back to PATH" >&2
-fi
+# A missing compiler here is fatal, not a warning.  The stock crosstool would
+# build this module perfectly happily and stamp "GCC: (GNU) 6.5.0" into
+# .comment 159 times, so falling back to PATH does not produce a broken build -
+# it produces a plausible one with the wrong SHA-256, which is worse.  The
+# `cc` line below records which compiler was used: the pkgversion is in it.
+: "${TOOLCHAIN_BIN:=$VENDOR_GCC_BIN}"
+toolchain_require "$TOOLCHAIN_BIN" \
+    "the module carries the compiler's --with-pkgversion in .comment" \
+    "sh build/build-gcc-vendor.sh"
 
 echo "=== source   $SRC"
 echo "=== build in $VENDOR_ROOT"
 echo "=== kernel   $KSRC"
-echo "=== cc       $(arm-linux-gnueabi-gcc --version | head -1)"
+echo "=== cc       $("$TOOLCHAIN_TARGET-gcc" --version | head -1)  [$TOOLCHAIN_BIN]"
 
 rm -rf "$VENDOR_ROOT"
 mkdir -p "$VENDOR_ROOT"
@@ -64,7 +73,7 @@ make clean >/dev/null 2>&1 || true
 STAMP="-Wno-builtin-macro-redefined -D__DATE__='\"$BUILD_DATE\"' -D__TIME__='\"$BUILD_TIME\"'"
 
 make -j"$(nproc)" \
-     ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- KSRC="$KSRC" \
+     ARCH=arm CROSS_COMPILE="$TOOLCHAIN_TARGET-" KSRC="$KSRC" \
      HOSTCFLAGS="-Wall -O2 -fomit-frame-pointer -std=gnu89 -fcommon" \
      USER_EXTRA_CFLAGS="$STAMP" \
      "$@"

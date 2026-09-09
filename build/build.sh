@@ -10,19 +10,30 @@
 # build/build-gcc-vendor.sh, which carries the vendor's --with-pkgversion; set it
 # to /opt/gcc-6.5.0-nolibc/arm-linux-gnueabi/bin for the stock kernel.org
 # crosstool. The two are the same compiler apart from that string.
+#
+# SRC is the tree to build, and defaults to /src, where the container has this
+# repository bind-mounted.
 set -e
-cd /src
+
+# See build/toolchain-env.sh: it puts the crosstool prebuilt on PATH and names
+# both toolchains, so this script works in a fresh shell and not only inside
+# build/Dockerfile's image.  Sourced before the cd.
+_here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "${TOOLCHAIN_ENV:-$_here/toolchain-env.sh}"
+
+cd "${SRC:-/src}"
 : "${KSRC:=/build/linux}"
-: "${TOOLCHAIN_BIN:=/opt/gcc-6.5.0-vendor/arm-linux-gnueabi/bin}"
-if [ -x "$TOOLCHAIN_BIN/arm-linux-gnueabi-gcc" ]; then
-    PATH="$TOOLCHAIN_BIN:$PATH"
-    export PATH
-fi
+# Fatal rather than a silent fallback: the two compilers differ only in the
+# .comment string, so the wrong one builds a module that looks right.
+: "${TOOLCHAIN_BIN:=$VENDOR_GCC_BIN}"
+toolchain_require "$TOOLCHAIN_BIN" \
+    "the module carries the compiler's --with-pkgversion in .comment" \
+    "sh build/build-gcc-vendor.sh"
 echo "=== KSRC=$KSRC"
-echo "=== cc   $(arm-linux-gnueabi-gcc --version | head -1)"
+echo "=== cc   $("$TOOLCHAIN_TARGET-gcc" --version | head -1)  [$TOOLCHAIN_BIN]"
 make clean >/dev/null 2>&1 || true
 make -j"$(nproc)" \
-     ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- KSRC="$KSRC" \
+     ARCH=arm CROSS_COMPILE="$TOOLCHAIN_TARGET-" KSRC="$KSRC" \
      HOSTCFLAGS="-Wall -O2 -fomit-frame-pointer -std=gnu89 -fcommon" \
      "$@"
 echo "=== result ==="

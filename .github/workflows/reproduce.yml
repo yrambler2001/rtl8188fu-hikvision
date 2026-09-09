@@ -28,6 +28,15 @@
 # arm64, that is not a CI problem to paper over by pinning the runner. It is a
 # finding about GCC 6.5.0 - a host-dependent code-generation path - and it is
 # worth investigating before anything here is changed.
+#
+# ONE RECIPE, NOT TWO.
+# Every step below runs a build/*.sh script that the local Docker flow runs too
+# (README §5.2); the workflow supplies paths and nothing else. Each of those
+# scripts sources build/toolchain-env.sh and so establishes its own toolchain
+# PATH, because a GitHub Actions `run:` step is a fresh shell and a PATH
+# exported by one step does not survive into the next. Anything a step needs
+# from an earlier step is either written into $GITHUB_PATH / this job's `env:`,
+# or - better - re-derived by the script itself.
 
 name: reproduce
 
@@ -75,7 +84,9 @@ jobs:
       #
       # The sources.list lines here duplicate build/setup-toolchain.sh, which
       # cannot be used yet because it is in the repository we are about to
-      # check out. That script is the authority; keep the two in step.
+      # check out. That script is the authority; keep the two in step. The
+      # retry loop is there for the same reason it is there: bullseye is EOL
+      # and snapshot.debian.org is occasionally slow to answer.
       - name: Bootstrap git for checkout
         run: |
           set -e
@@ -88,8 +99,16 @@ jobs:
           rm -f /etc/apt/sources.list.d/*.list 2>/dev/null || true
           printf 'Acquire::Check-Valid-Until "false";\nAcquire::Retries "5";\n' \
             > /etc/apt/apt.conf.d/99no-check-valid
-          apt-get -o Acquire::Check-Valid-Until=false update
-          apt-get install -y --no-install-recommends git ca-certificates curl xz-utils
+          n=0
+          until apt-get -o Acquire::Check-Valid-Until=false update \
+             && apt-get install -y --no-install-recommends \
+                    git ca-certificates curl xz-utils
+          do
+            n=$((n + 1))
+            [ "$n" -lt 3 ] || { echo "!! apt failed $n times" >&2; exit 1; }
+            echo "== apt failed, retry $n/3 in 20s" >&2
+            sleep 20
+          done
 
       - uses: actions/checkout@v4
 
@@ -97,61 +116,124 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       # ------------------------------------------------------------------
-      # Toolchain. Both caches are keyed on the script that produces them, so
-      # editing that script invalidates exactly the cache it invalidates.
+      # Toolchain.
+      #
+      # Each cache is keyed on every file that decides its contents, which now
+      # includes build/toolchain-env.sh: that file names the install prefixes
+      # and picks which compiler configures the kernel, so editing it has to
+      # invalidate the things built with it.
+      #
+      # These are restore/save pairs rather than plain actions/cache because
+      # actions/cache only saves when the whole job succeeds (its post step is
+      # `post-if: success()`), and this job's last step is an assertion that is
+      # allowed to fail. A failing assertion would otherwise throw away the ~10
+      # minutes of toolchain and kernel work that produced it, and the next run
+      # would start cold again. Each save is guarded on the step that actually
+      # produced the directory having succeeded, so a half-built prefix is
+      # never cached.
       # ------------------------------------------------------------------
-      - name: Cache crosstool prebuilt (binutils 2.32 + control compiler)
-        uses: actions/cache@v4
+      - name: Restore crosstool prebuilt (binutils 2.32 + control compiler)
+        id: crosstool
+        uses: actions/cache/restore@v4
         with:
           path: /opt/gcc-6.5.0-nolibc
-          key: crosstool-6.5.0-${{ runner.arch }}-${{ hashFiles('build/setup-toolchain.sh') }}
+          key: >-
+            crosstool-6.5.0-${{ runner.arch }}-${{
+            hashFiles('build/setup-toolchain.sh', 'build/toolchain-env.sh') }}
 
+      # Runs on every run, cache hit or not: the container is fresh each time,
+      # so the apt prerequisites have to be installed even when /opt is warm.
       - name: Prerequisites and crosstool
+        id: prereqs
         run: sh build/setup-toolchain.sh
 
-      - name: Cache GCC 6.5.0 built with the vendor --with-pkgversion
-        id: cache-gcc
-        uses: actions/cache@v4
+      # Belt and braces. build/*.sh each put their own toolchain on PATH, which
+      # is what makes them work in a fresh shell and is the mechanism this job
+      # relies on; this makes the crosstool visible to ad-hoc `run:` commands
+      # too, and it reads the location from the same file the scripts do rather
+      # than repeating it. The vendor-pkgversion GCC is deliberately NOT added:
+      # only the module build may use that one, and it selects it itself.
+      - name: Put the crosstool on PATH for later steps
+        run: |
+          . build/toolchain-env.sh
+          echo "$CROSSTOOL_BIN" >> "$GITHUB_PATH"
+
+      - name: Restore GCC 6.5.0 built with the vendor --with-pkgversion
+        id: gcc-vendor
+        uses: actions/cache/restore@v4
         with:
           path: /opt/gcc-6.5.0-vendor
-          key: gcc-vendor-6.5.0-${{ runner.arch }}-${{ hashFiles('build/build-gcc-vendor.sh') }}
+          key: >-
+            gcc-vendor-6.5.0-${{ runner.arch }}-${{
+            hashFiles('build/build-gcc-vendor.sh', 'build/toolchain-env.sh') }}
 
-      # The expensive step, ~25-40 min cold. It is what puts
-      # "GCC: (arm_multilib_uclibc_20200924) 6.5.0" in .comment, 159 times.
+      # The expensive step, 9 min cold on a 4-core x86_64 runner. It is what
+      # puts "GCC: (arm_multilib_uclibc_20200924) 6.5.0" in .comment, 159 times.
       - name: Build GCC 6.5.0 with the vendor pkgversion
-        if: steps.cache-gcc.outputs.cache-hit != 'true'
+        id: build-gcc
+        if: steps.gcc-vendor.outputs.cache-hit != 'true'
         run: sh build/build-gcc-vendor.sh
+
+      - name: Save the vendor GCC
+        if: always() && steps.gcc-vendor.outputs.cache-hit != 'true' && steps.build-gcc.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/gcc-6.5.0-vendor
+          key: ${{ steps.gcc-vendor.outputs.cache-primary-key }}
+
+      - name: Save the crosstool prebuilt
+        if: always() && steps.crosstool.outputs.cache-hit != 'true' && steps.prereqs.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/gcc-6.5.0-nolibc
+          key: ${{ steps.crosstool.outputs.cache-primary-key }}
 
       # ------------------------------------------------------------------
       # Vendor kernel: fetch one commit, retarget CPU_V6 -> CPU_V7, configure
       # with fh8856v200_defconfig, modules_prepare.
       # ------------------------------------------------------------------
-      - name: Cache prepared vendor kernel
-        id: cache-kernel
-        uses: actions/cache@v4
+      - name: Restore prepared vendor kernel
+        id: kernel
+        uses: actions/cache/restore@v4
         with:
           path: /build/linux-vendor
           key: >-
             vendor-kernel-${{ env.VENDOR_COMMIT }}-${{ runner.arch }}-${{
-            hashFiles('build/fetch-vendor-kernel.sh', 'build/prepare-vendor-kernel.sh') }}
+            hashFiles('build/fetch-vendor-kernel.sh', 'build/prepare-vendor-kernel.sh', 'build/toolchain-env.sh') }}
 
       - name: Fetch the vendor kernel
-        if: steps.cache-kernel.outputs.cache-hit != 'true'
+        id: fetch-kernel
+        if: steps.kernel.outputs.cache-hit != 'true'
         run: sh build/fetch-vendor-kernel.sh
 
       - name: Configure the vendor kernel
-        if: steps.cache-kernel.outputs.cache-hit != 'true'
+        id: prepare-kernel
+        if: steps.kernel.outputs.cache-hit != 'true'
         run: sh build/prepare-vendor-kernel.sh
+
+      - name: Save the prepared vendor kernel
+        if: always() && steps.kernel.outputs.cache-hit != 'true' && steps.prepare-kernel.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: /build/linux-vendor
+          key: ${{ steps.kernel.outputs.cache-primary-key }}
 
       # ------------------------------------------------------------------
       # The assertion.
       # ------------------------------------------------------------------
+      # Paths come from build/toolchain-env.sh and from this job's `env:`, so
+      # this step reports the toolchain the build will actually use rather than
+      # a second copy of the same string.
       - name: Record the environment
         run: |
+          . build/toolchain-env.sh
           echo "host          $(uname -m)  $(. /etc/os-release; echo "$PRETTY_NAME")"
           echo "host gcc      $(gcc --version | head -1)"
-          echo "cross gcc     $(/opt/gcc-6.5.0-vendor/arm-linux-gnueabi/bin/arm-linux-gnueabi-gcc --version | head -1)"
-          echo "kernel        $(cat /build/linux-vendor/include/generated/utsrelease.h)"
+          echo "on PATH       $(command -v "$TOOLCHAIN_TARGET-gcc")"
+          echo "kernel cc     $("$CROSSTOOL_BIN/$TOOLCHAIN_TARGET-gcc" --version | head -1)"
+          echo "module cc     $("$VENDOR_GCC_BIN/$TOOLCHAIN_TARGET-gcc" --version | head -1)"
+          echo "binutils      $("$VENDOR_GCC_BIN/$TOOLCHAIN_TARGET-as" --version | head -1)"
+          echo "kernel        $(cat "$KSRC/include/generated/utsrelease.h")"
 
       # verify.sh exports HEAD with `git archive`, builds it twice, requires the
       # two builds to be identical, and asserts $EXPECT_SHA256. It is the same

@@ -21,8 +21,12 @@ ARG KVER=4.9.129
 # script on the runner (.github/workflows/reproduce.yml), so the image and the
 # CI environment cannot drift. It picks the arm64- or the x86_64-hosted
 # prebuilt from `uname -m`, which is why this image builds on either host.
-COPY setup-toolchain.sh /tmp/setup-toolchain.sh
-RUN sh /tmp/setup-toolchain.sh && rm -f /tmp/setup-toolchain.sh
+#
+# toolchain-env.sh travels with it: setup-toolchain.sh sources its sibling for
+# the install prefix and the PATH rule, so that this image, the CI runner and a
+# bare shell all agree about where the two compilers live.
+COPY setup-toolchain.sh toolchain-env.sh /tmp/
+RUN sh /tmp/setup-toolchain.sh && rm -f /tmp/setup-toolchain.sh /tmp/toolchain-env.sh
 #
 # That prebuilt is stock GCC, so its .comment reads "GCC: (GNU) 6.5.0" while the
 # shipped module reads "GCC: (arm_multilib_uclibc_20200924) 6.5.0" - GCC's
@@ -31,6 +35,10 @@ RUN sh /tmp/setup-toolchain.sh && rm -f /tmp/setup-toolchain.sh
 # installs it alongside at /opt/gcc-6.5.0-vendor; the build scripts prefer it when
 # present. It is a runtime step (13 minutes, 3 GB of scratch), not an image layer.
 # See FINDINGS-toolchain.md.
+#
+# Redundant since build/toolchain-env.sh puts this on PATH for every script that
+# needs it, and kept anyway: it is what makes `docker exec fuv
+# arm-linux-gnueabi-gcc ...` and the build/oem/ helpers work interactively.
 ENV PATH="/opt/gcc-6.5.0-nolibc/arm-linux-gnueabi/bin:${PATH}"
 RUN arm-linux-gnueabi-gcc --version && arm-linux-gnueabi-gcc -v 2>&1 | tail -3
 
