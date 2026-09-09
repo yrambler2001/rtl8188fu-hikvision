@@ -510,7 +510,11 @@ char *ez_strsep(char **stringp, char delim, char esc)
 			return s;
 		}
 		if (c == esc) {
-			if (*p == esc || *p == delim) {
+			if (*p == esc) {
+				memmove(q, p, strlen(q));
+				continue;
+			}
+			if (*p == delim) {
 				memmove(q, p, strlen(q));
 				continue;
 			}

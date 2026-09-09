@@ -21,4 +21,6 @@ eval set -- "$FLAGS" -Wno-builtin-macro-redefined \
     -DKBUILD_BASENAME='\"'"$B"'\"' -DKBUILD_MODNAME='\"8188fu\"' \
     -D__DATE__="'\"Dec 25 2023\"'" -D__TIME__="'\"20:43:30\"'" $EXTRA
 cd "$KSRC"
-exec arm-linux-gnueabi-gcc "$@" -c -o "/tmp/dumps/$B.o" "$SRC/os_dep/linux/$B.c" 
+# SRCFILE lets the same dump run against a lab variant instead of the tree copy
+: "${SRCFILE:=$SRC/os_dep/linux/$B.c}"
+exec arm-linux-gnueabi-gcc "$@" -c -o "/tmp/dumps/$B.o" "$SRCFILE" 

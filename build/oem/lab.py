@@ -42,6 +42,9 @@ if not os.path.exists(GCC):
 
 TIME = {'ez_sc': '20:43:27', 'ez_wifi_config': '20:43:30'}
 
+# bump when the scoring changes, so stale entries are recomputed
+CACHE_VERSION = b'v3'
+
 
 def shlex_split(s):
     """Minimal shlex (the container python has no shlex either)."""
@@ -83,11 +86,70 @@ def gcc_cmd(base, cfile, unit, obj, extra=()):
     ] + list(extra) + ['-c', '-o', obj, cfile]
 
 
+import struct as _struct
+
+
+def _regmask(w):
+    """Blank the register fields of one ARM A32 word.
+
+    A variant that is right except for which registers IRA picked scores zero
+    here while `n` is still large, so this is the gradient the search needs:
+    `n` counts differing words and a wholesale renaming makes almost every
+    word differ, which tells you nothing about whether the shape is right.
+    """
+    cls = (w >> 26) & 3
+    if cls == 0:                      # data processing / misc
+        w &= ~0x000FF000              # Rn, Rd
+        if not (w >> 25) & 1:         # register operand
+            w &= ~0x0000000F          # Rm
+            if (w >> 4) & 1:
+                w &= ~0x00000F00      # Rs
+    elif cls == 1:                    # load / store
+        w &= ~0x000FF000              # Rn, Rd
+        if (w >> 25) & 1:
+            w &= ~0x0000000F          # Rm
+    elif ((w >> 25) & 7) == 4:        # LDM / STM
+        w &= ~0x000F0000              # Rn
+    return w
+
+
+def _words(b):
+    return [_regmask(_struct.unpack_from('<I', b, i)[0])
+            for i in range(0, len(b) - 3, 4)]
+
+
+def structdist(sb, ob):
+    """Levenshtein distance of the register-blanked instruction sequences.
+
+    Positional comparison is useless as a gradient here: one inserted
+    instruction shifts everything after it and every later word counts as
+    different.  An edit distance says how many instructions really differ,
+    which is what tells you whether a variant is getting warmer.
+    """
+    a, b = _words(sb), _words(ob)
+    prev = list(range(len(b) + 1))
+    for i, x in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, y in enumerate(b, 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1,
+                         prev[j - 1] + (0 if x == y else 1))
+        prev = cur
+    return prev[len(b)]
+
+
 def score(ship, funcs, obj, focus=None):
-    """{name: (differing words, size delta)} plus the total."""
+    """{name: (differing words, size delta, structural distance)} + the total."""
     ours = oemdiff.View(obj)
     rows, _, _, _ = oemdiff.compare(ship, ours, funcs, focus, False)
     per, tot = {}, 0
+    oaddr = {}
+    for a, nm in ours.faddr.items():
+        oaddr[nm] = a
+    osize = {}
+    for sy in ours.e.syms:
+        if sy['type'] == 2:
+            osize[sy['name']] = sy['size']
+    fsize = {nm: (ad, sz) for nm, ad, sz, _ in funcs}
     for name, fn, size, st, why in rows:
         if st == 'ABSENT':
             continue
@@ -97,7 +159,12 @@ def score(ship, funcs, obj, focus=None):
                 n = int(part[2:])
             elif part.startswith('d='):
                 d = int(part[2:])
-        per[name] = (n, d)
+        sd = 0
+        if n:
+            sb, _ = ship.norm(fsize[name][0], size)
+            ob, _ = ours.norm(oaddr[name], osize[name])
+            sd = structdist(sb, ob)
+        per[name] = (n, d, sd)
         tot += n
     return tot, per
 
@@ -115,8 +182,10 @@ def cache_load(path):
     for item in rest.split(';'):
         if not item:
             continue
-        k, n, d = item.split(',')
-        per[k] = (int(n), int(d))
+        parts = item.split(',')
+        k, n, d = parts[0], parts[1], parts[2]
+        sd = parts[3] if len(parts) > 3 else '0'
+        per[k] = (int(n), int(d), int(sd))
     return (int(tot), per)
 
 
@@ -126,7 +195,8 @@ def cache_store(path, res):
         return
     tot, per = res
     open(path, 'w').write('%d|%s' % (
-        tot, ';'.join('%s,%d,%d' % (k, v[0], v[1]) for k, v in sorted(per.items()))))
+        tot, ';'.join('%s,%d,%d,%d' % (k, v[0], v[1], v[2])
+                      for k, v in sorted(per.items()))))
 
 
 def main():
@@ -162,7 +232,8 @@ def main():
     for v in variants:
         path = os.path.join(d, v)
         h = hashlib.sha256(open(path, 'rb').read()
-                           + (' '.join(a.extra)).encode()).hexdigest()[:16]
+                           + (' '.join(a.extra)).encode()
+                           + CACHE_VERSION).hexdigest()[:16]
         cf = os.path.join(cachedir, h)
         got = cache_load(cf)
         if got is not None:
@@ -206,22 +277,23 @@ def main():
     for v in variants:
         res = results[v]
         if res[0] == 'error':
-            rows.append((10 ** 9, 0, v, 'ERROR ' + res[1]))
+            rows.append((10 ** 9, 0, 0, v, 'ERROR ' + res[1]))
             continue
         tot, per = res
         if a.fn:
-            n, dd = per.get(a.fn, (10 ** 8, 0))
-            rows.append((n, dd, v, 'n=%d d=%+d' % (n, dd)))
+            n, dd, sd = per.get(a.fn, (10 ** 8, 0, 10 ** 8))
+            rows.append((sd, abs(dd), n, v, 'n=%d d=%+d s=%d' % (n, dd, sd)))
         else:
-            bad = [k for k, (n, dd) in per.items() if n]
-            rows.append((tot, 0, v, 'tot=%d  bad=%s' % (tot, ','.join(sorted(bad)) or '-')))
-    rows.sort(key=lambda r: (r[0], abs(r[1]), r[2]))
-    for n, dd, v, txt in rows[:a.top]:
+            bad = [k for k, val in per.items() if val[0]]
+            rows.append((0, 0, tot, v,
+                         'tot=%d  bad=%s' % (tot, ','.join(sorted(bad)) or '-')))
+    rows.sort(key=lambda r: (r[0], r[1], r[2], r[3]))
+    for dd, sd, n, v, txt in rows[:a.top]:
         print('%-46s %s' % (v, txt))
     if len(rows) > a.top:
         print('... %d more' % (len(rows) - a.top))
     print('\nbest: %s  %s   (%d variants, %d compiled, %.1fs)' %
-          (rows[0][2], rows[0][3], len(rows), len(todo), time.time() - t0))
+          (rows[0][3], rows[0][4], len(rows), len(todo), time.time() - t0))
     return 0
 
 
