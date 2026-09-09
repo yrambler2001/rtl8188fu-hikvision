@@ -11,3 +11,4 @@ modules.order
 *.d
 __pycache__/
 build/oem/lab/
+cleanchk/
