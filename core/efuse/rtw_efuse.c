@@ -18,7 +18,6 @@
 #include <hal_data.h>
 
 #include "../hal/efuse/efuse_mask.h"
-/* OEM patch line-count reconciliation: +1, see core/rtw_mlme_ext.c. */
 
 /*------------------------Define local variable------------------------------*/
 u8	fakeEfuseBank = {0};
@@ -1089,13 +1088,14 @@ void rtw_efuse_analyze(PADAPTER	padapter, u8 Type, u8 Fake)
 	j = 0;
 
 	for (i = 0; i < mapLen; i++) {
-		if (i % 16 == 0)
+		if (i % 16 == 0) {
 			RTW_PRINT_SEL(RTW_DBGDUMP, "0x%03x: ", i);
 			_RTW_PRINT_SEL(RTW_DBGDUMP, "%02X%s"
 				, pEfuseHal->fakeEfuseInitMap[i]
 				, ((i + 1) % 16 == 0) ? "\n" : (((i + 1) % 8 == 0) ? "	  " : " ")
 			);
 		}
+	}
 	_RTW_PRINT_SEL(RTW_DBGDUMP, "\n");
 
 out_free_buffer:
