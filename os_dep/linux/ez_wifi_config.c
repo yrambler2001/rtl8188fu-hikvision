@@ -121,8 +121,8 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 	unsigned int pos = 0;
 	u32 n = 0;
 	int m = 0;
-	int j = 0;
 	int end = 0;
+	int j = 0;
 
 	for (i = 0; i < len; i++) {
 		if (buf[i] == '\r')
