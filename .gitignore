@@ -10,3 +10,4 @@ modules.order
 *.symvers
 *.d
 __pycache__/
+build/oem/lab/
