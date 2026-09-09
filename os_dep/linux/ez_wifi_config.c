@@ -493,27 +493,27 @@ int ez_get_mac_addr(void)
 	}
 
 	len = ez_os_get_image_block(buf, EZ_CONFIG_BUF_SIZE, fp);
-	if (len <= 0 || len >= EZ_CONFIG_BUF_SIZE) {
-		RTW_ERR("%s: error reading config file: %d,use default mac addr and countrycode: CN \n",
-			__FUNCTION__, len);
-		ret = -1;
-	} else {
+	if (len > 0 && len < EZ_CONFIG_BUF_SIZE) {
 		int n;
 
 		ret = 0;
 		buf[len] = '\0';
 		memset(pick, 0, EZ_PICK_BUF_SIZE);
 		n = process_config_vars(buf, len, pick, "mac_addr=");
-		if (n == 17) {
+		if (n != 17) {
+			RTW_ERR("%s: the length is bad :%d! \n", __FUNCTION__, n);
+		} else {
 			memset(ez_mac_addr, 0, sizeof(ez_mac_addr));
 			memcpy(ez_mac_addr, pick, 17);
 			ret = 0;
 			rtw_initmac = ez_mac_addr;
 			printk("%s: pick=%s,rtw_initmac:%s, len=%d\n", __FUNCTION__, pick,
 			       ez_mac_addr, n);
-		} else {
-			RTW_ERR("%s: the length is bad :%d! \n", __FUNCTION__, n);
 		}
+	} else {
+		RTW_ERR("%s: error reading config file: %d,use default mac addr and countrycode: CN \n",
+			__FUNCTION__, len);
+		ret = -1;
 	}
 
 	kfree(pick);
@@ -525,12 +525,12 @@ close:
 	return ret;
 }
 
-void ez_wifi_preinit(void)
+int ez_wifi_preinit(void)
 {
 	struct file *fp = NULL;
 	char *buf = NULL;
 	char *pick = NULL;
-	char *ccode;
+
 	int len;
 	int ret = 0;
 
@@ -560,30 +560,27 @@ void ez_wifi_preinit(void)
 	}
 
 	len = ez_os_get_image_block(buf, EZ_CONFIG_BUF_SIZE, fp);
-	if (len <= 0 || len >= EZ_CONFIG_BUF_SIZE) {
+	if (len > 0 && len < EZ_CONFIG_BUF_SIZE) {
+		buf[len] = '\0';
+		memset(pick, 0, EZ_PICK_BUF_SIZE);
+		len = process_config_vars(buf, len, pick, "ccode=");
+		if (len) {
+			if (len != 2) {
+				RTW_ERR("%s: the countrycode length is bad ! \n", __FUNCTION__);
+				pick = "CN";
+			}
+			RTW_ERR("%s: pick=%s,len=%d\n", __FUNCTION__, pick, len);
+			ret = 0;
+			ez_set_country(pick);
+		} else {
+			RTW_ERR("%s: error file content=%d\n", __FUNCTION__, 0);
+			ret = -1;
+		}
+	} else {
 		RTW_ERR("%s: error reading config file,set default countrycode: CN \n",
 			__FUNCTION__);
 		ret = -1;
-		goto version;
 	}
-
-	buf[len] = '\0';
-	memset(pick, 0, EZ_PICK_BUF_SIZE);
-	len = process_config_vars(buf, len, pick, "ccode=");
-	if (!len) {
-		RTW_ERR("%s: error file content=%d\n", __FUNCTION__, 0);
-		ret = -1;
-		goto version;
-	}
-
-	ccode = pick;
-	if (len != 2) {
-		RTW_ERR("%s: the countrycode length is bad ! \n", __FUNCTION__);
-		ccode = "CN";
-	}
-	RTW_ERR("%s: pick=%s,len=%d\n", __FUNCTION__, ccode, len);
-	ret = 0;
-	ez_set_country(ccode);
 
 version:
 	ez_wifi_version_info();
@@ -598,12 +595,18 @@ set_default:
 		goto free_buf;
 
 free_pick:
-	kfree(pick);
+	/* Yes, NULL.  The shipped module emits "mov r0, #0; bl kfree" here, under
+	 * the "pick != NULL" guard above -- so the vendor leaks the 1 KB pick
+	 * buffer on every probe.  Reproducing the bug is what makes this function
+	 * byte-identical; kfree(pick) differs in exactly this one instruction. */
+	kfree(NULL);
 free_buf:
 	if (buf)
 		kfree(buf);
 	if (fp)
 		ez_os_close_image(fp);
+
+	return ret;
 }
 
 u32 ez_GetMaskBit(void)

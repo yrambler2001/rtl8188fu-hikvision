@@ -82,7 +82,7 @@ int ez_probe_response_eid208_handler(u8 *pframe, int len);
 int ez_probe_requst_eid208_handler(u8 *pframe, int len);
 
 /* ez_wifi_config.c */
-void ez_wifi_preinit(void);
+int ez_wifi_preinit(void);
 int ez_read_rssi_per_ant_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
 int ez_wifi_func_poll_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cmd);
 int ez_wifi_module_rf_calibration_check_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
