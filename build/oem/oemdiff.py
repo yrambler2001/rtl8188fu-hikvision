@@ -151,13 +151,14 @@ def compare(ship, ours, funcs, want=None, verbose=False):
         sb, sops = ship.norm(addr, size)
         ob, oops = ours.norm(oaddr, osz)
         if osz != size:
-            rows.append((name, fn, size, 'SIZE %+d' % (osz - size), ''))
+            rows.append((name, fn, size, 'SIZE %+d' % (osz - size),
+                         'n=%d,d=%+d' % (worddist(sb, ob, sops, oops), osz - size)))
             bad += 1
             if verbose:
                 dump(ship, ours, name, addr, size, oaddr, osz)
             continue
         if sb == ob and sops == oops:
-            rows.append((name, fn, size, 'OK', ''))
+            rows.append((name, fn, size, 'OK', 'n=0,d=+0'))
             ok += 1
             continue
         d = next((i for i in range(size) if sb[i] != ob[i]), None)
@@ -167,11 +168,25 @@ def compare(ship, ours, funcs, want=None, verbose=False):
                 if a != bb:
                     why = 'reloc@%d %s != %s' % (a[0], a[2], bb[2])
                     break
+        why = 'n=%d,d=+0 %s' % (worddist(sb, ob, sops, oops), why)
         rows.append((name, fn, size, 'DIFF', why))
         bad += 1
         if verbose:
             dump(ship, ours, name, addr, size, oaddr, osz)
     return rows, ok, bad, miss
+
+
+def worddist(sb, ob, sops, oops):
+    """Number of 4-byte words that differ, counting operand kind/target too."""
+    so = {o: (k, t) for o, k, t in sops}
+    oo = {o: (k, t) for o, k, t in oops}
+    n = 0
+    for i in range(0, max(len(sb), len(ob)), 4):
+        a = sb[i:i + 4] if i < len(sb) else None
+        b = ob[i:i + 4] if i < len(ob) else None
+        if a != b or so.get(i) != oo.get(i):
+            n += 1
+    return n
 
 
 def dump(ship, ours, name, addr, size, oaddr, osz):
@@ -216,6 +231,8 @@ def main():
                     help='also score this (public) function, by name')
     ap.add_argument('--catalogue', action='store_true')
     ap.add_argument('-v', '--verbose', action='store_true')
+    ap.add_argument('--score', action='store_true',
+                    help='compact machine-readable score: NAME dsize nwords')
     a = ap.parse_args()
 
     ship = View(a.shipped)
@@ -247,6 +264,10 @@ def main():
             allrows.append((name, fn, size, 'ABSENT', ''))
     order = {n: i for i, (n, _, _, _) in enumerate(funcs)}
     allrows.sort(key=lambda r: order.get(r[0], 999))
+    if a.score:
+        for name, fn, size, st, why in allrows:
+            print('SCORE %s %s' % (name, why if why.startswith('n=') else 'n=?'))
+        return 0
     for name, fn, size, st, why in allrows:
         if st == 'OK':
             okbytes += size

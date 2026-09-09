@@ -215,7 +215,7 @@ int ez_new_sc_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cmd)
 int ez_device_info_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	struct iwreq *wrq = (struct iwreq *)rq;
-	u32 len;
+	u16 len;
 	int ret;
 
 	printk("%s()\n", __func__);
@@ -490,17 +490,17 @@ trig_scan:
 		break;
 
 	case POLL_REASON: {
-		u32 reason;
+		u8 reason[4];
 
 		printk("cmd POLL_REASON!\n");
-		reason = *(u32 *)&probe_resp_t.value[probe_resp_t.len];
-		if ((u16)reason == 0x6994) {
-			sc.len = (u8)(reason >> 16);
-			memcpy(sc.value, (u8 *)&reason + 3, (u8)(reason >> 16));
-			printk("poll reason,len:%d,value:%d\r\n", (u8)(reason >> 16), sc.value[0]);
+		memcpy(reason, &probe_resp_t.value[probe_resp_t.len], 4);
+		if (*(u16 *)reason == 0x6994) {
+			sc.len = reason[2];
+			memcpy(sc.value, &reason[3], reason[2]);
+			printk("poll reason,len:%d,value:%d\r\n", reason[2], sc.value[0]);
 		} else {
-			sc.cmd = 1;
-			sc.len = 0xff;
+			sc.len = 1;
+			sc.value[0] = 0xff;
 		}
 		ret = copy_to_user(wrq->u.data.pointer, &sc, sizeof(sc));
 		break;
