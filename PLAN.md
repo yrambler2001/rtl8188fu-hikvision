@@ -8,8 +8,11 @@ SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
 
 * `build/fulldiff.py <shipped> <rebuilt> [--brief]` — whole-file scoreboard:
   every section, the symbol table, the relocations and the string tables.
-  Current: **348 bytes still differ (0.018% of the file)**; 35 of the 41
-  sections are byte-identical.
+  Current: **1,421 bytes still differ positionally (0.07% of the file)**, 228
+  by the shift-tolerant "structural" count; 35 of the 41 sections are
+  byte-identical.  *Compare attempts by the raw number:* the structural count
+  charges a function whose size is wrong only its size delta and never looks
+  inside it, so it can rate a worse state better.
   *Caveat:* it strips GCC's `.NNNN` uniquifiers before comparing `.strtab`, so
   a `.strtab` scored 0 is not necessarily byte-identical. Use
   `build/oem/uidgap.py` for that - it prints the DECL_UID oracle per interval.
@@ -49,7 +52,8 @@ SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
   `fh8856v200_defconfig`, retargeted `CPU_V6` → `CPU_V7`
 - **WP-C** driver `#ifdef` configuration *(done — `FINDINGS-driver-config.md`)*
 - **WP-D** reconstruct `ez_sc.c` / `ez_wifi_config.c` *(done —
-  `FINDINGS-oem-catalogue.md`)*: 28,368 → 348 bytes
+  `FINDINGS-oem-catalogue.md`)*: 28,368 → 1,421 bytes, 43/46 functions
+  byte-identical
 - **WP-E** build under the original path *(done — `FINDINGS-byte-gap.md` §3)*
 - **WP-F** GCC 6.5.0 with `--with-pkgversion='arm_multilib_uclibc_20200924'`
   *(done — `FINDINGS-toolchain.md`)*: `.comment` 9,347 → 0 bytes, and all 158
@@ -69,20 +73,20 @@ SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
 
 ## Residuals
 
-**348 bytes.** Four functions in `.text` — four ARM instructions and one
-literal-pool word in total — each a register-allocation or CSE tie with a
-mechanism now identified exactly (`FINDINGS-oem-catalogue.md` §10, §16–18):
+**1,421 bytes.** Three functions in `.text`, all of them now the *right size*,
+each a register-allocation tie with a mechanism identified exactly
+(`FINDINGS-oem-catalogue.md` §10, §17–19):
 
-| function | delta | cause |
+| function | differs by | cause |
 |---|---:|---|
-| `ez_scan_device_ioctl_handle` | +4, and ~192 of `.rel.text` | one literal-pool word, `.LANCHOR0+622`. The shipped build derives `&probe_req_t` from the `.bss` anchor with `add r5, r4, #612` and `&probe_req_t.value` with `add r0, r5, #10`; ours folds `anchor + 622` — not an encodable ARM immediate — into one pool constant at `cse_local`, and that word displaces the rest of the pool |
-| `process_config_vars` | +8 | two copies on the loop back edge. The shipped build keeps `n` in a callee-saved register across the two calls (twelve call-crossing allocnos, three spills); VRP's `register_edge_assert_for` asserts `n == 0` from the loop guard here, so `n` is rematerialised instead and `pos` has to split |
-| `ez_strsep` | +4, 3 insns | one copy on the loop back edge: out-of-SSA coalesces the loop PHI with `q` rather than with `p + 1` |
-| `ez_new_sc_ioctl` | 20 bytes, right size | an IRA preference tie broken by `rq`'s weight-125 preference for r2 |
+| `process_config_vars` | 49 words of 86 | the register allocation now matches — `stm sp, {r2, r3}`, `pick` spilled, twelve call-crossing allocnos — which needed `n` live across the two calls, which needed VRP's `register_edge_assert_for` not to assert `n == 0` from the loop guard. What is left is which register IRA picked, and one instruction: every guard spelling that blocks the assertion needs a separate compare where the shipped build has one `orrs` |
+| `ez_new_sc_ioctl` | 5 words of 14 | an IRA preference tie broken by `rq`'s weight-125 preference for r2 |
+| `ez_strsep` | 4 words of 39 | the shipped build routes the delimiter path through the shared `*stringp` store; ours fuses the NUL store into a post-increment and does its own |
 
-Where the bytes are: `.rel.text` 280 (17/18 unmatched relocation entries,
-almost all the displaced pool), `.text` 36, `.note.gnu.build-id` 20 (an SHA-1
-over the linked output, converges last), `.symtab` 12 (three `st_size`).
+Where the bytes are: `.text` 1,002 (208 structural), `.note.gnu.build-id` 20
+(an SHA-1 over the linked output, converges last), and 399 bytes of relocation
+addends and branch displacements inside those three functions.  `.symtab`,
+`.strtab` and every relocation section are byte-identical.
 
 ## Rules learned, and where they are written up
 

@@ -5,8 +5,10 @@ This note is the catalogue WP-D was asked for: what the two missing translation
 units are, what is in them, how each fact was read out of the binary, and where
 the reconstruction stands.
 
-**Result so far:** the whole-file gap went **28,368 -> 56 bytes** (1.479% ->
-**0.003%** of 1,918,056). **35 of the 41 sections are byte-identical** -
+**Result so far:** the whole-file gap went **28,368 -> 1,421 bytes** of
+positional difference (1.479% -> **0.07%** of 1,918,056; 228 by the
+scoreboard's shift-tolerant structural count, which understates - see section
+10). **35 of the 41 sections are byte-identical** -
 `.rodata.str1.1`, `.rodata`, `.data`, `.bss`, `.comment`, `.modinfo`,
 `.ARM.exidx`, the ARM attributes, **`.strtab`** and eleven of the twelve
 relocation sections - every relocation in the module now matches - and
@@ -479,30 +481,40 @@ names. `annot.py` resolves literal-pool addends so the shipped code is readable.
 |---|---:|---|
 | before WP-D | 28,368 | 1.479% |
 | after WP-D | 972 | 0.051% |
-| after the first residual pass | 455 | 0.024% |
-| **now** | **56** | **0.003%** |
+| after the first residual pass | 455 structural / 433,444 raw | 0.024% |
+| **now** | **228 structural / 1,421 raw** | **0.07%** |
 
-| section | structural | what it is |
-|---|---:|---|
-| `.text` | 28 | 8 bytes of size delta across two functions, 20 bytes of content in a third |
-| `.note.gnu.build-id` | 20 | an SHA-1 of the module; converges last, by construction |
-| `.symtab` | 8 | two `st_size` fields |
+| section | structural | raw | what it is |
+|---|---:|---:|---|
+| `.text` | 208 | 1,002 | content in three functions; the section is the right *length* and every symbol the right size |
+| `.note.gnu.build-id` | 20 | 20 | an SHA-1 of the module; converges last, by construction |
+| everything else | 0 | 399 | relocation addends and B/BL displacements inside those three functions |
 
-**35 of the 41 sections are byte-identical**, including `.strtab` - all 879
-`__func__.NNNN` uniquifiers now match, so `.symtab`'s symbol order is exact
-with the suffixes rather than only without them (section 11).  **Every one of
-the 31,299 `.rel.text` relocations matches**, and so does every other
-relocation in the module.  The two size deltas are -4 and +4, so `.text` comes
-out the right length: the raw positional difference is **3,043 bytes**, 0.16%
-of the file, against 433,444 at the start of this pass.
+**35 of the 41 sections are byte-identical**, including `.strtab` *and*
+`.symtab` - all 879 `__func__.NNNN` uniquifiers match, every one of the 3,909
+function symbols has the shipped `st_size`, and the symbol order is exact with
+the suffixes rather than only without them (section 11).  **Every one of the
+38,970 relocations in the module matches.**  `.text` is exactly 975,780 bytes.
+
+### On the two numbers
+
+`fulldiff.py`'s **structural** count is shift-tolerant: it matches symbols by
+name, and it charges a function whose size is wrong only its size *delta*,
+without looking inside it.  That is what stops one moved function inflating
+the count into the hundreds of thousands - but it means it rates a 344-byte
+function that should be 340 at 4 bytes and a 344-byte function with 176
+differing bytes at 176.  An earlier state of this tree scored **56**
+structural while differing in 2,490 bytes of `.text`; this one scores 228 and
+differs in 1,002.  **Compare attempts by the raw number**; the structural one
+is for finding *where* the difference is, not how much of it there is.
 
 ### Closed during this pass
 
 | | was | now | how |
 |---|---|---|---|
 | `ez_scan_device_ioctl_handle` | +4 bytes, one extra pool word, ~192 bytes of `.rel.text` | **byte-identical** | there is no `goto trig_scan`: the shared tail is written out in both TRIG arms and cross-jumping merges it.  Sections 16 and 19 |
-| `process_config_vars` | +8 bytes, edit distance 21 | -4 bytes, edit distance 12 | an if-chain rather than a `switch`, `pos = 0` per path, and `pos` a different tree type from `n`.  Sections 15, 17, 19 |
-| `ez_strsep` | 156 bytes, 26 words | 160 bytes, 17 words, **3 instructions** | the escape test is two `if`s with a duplicated `memmove`; sections 18 and 19 |
+| `process_config_vars` | +8 bytes, 84 differing words | right size, **49** words, and the shipped register allocation | an if-chain rather than a `switch`, `pos = 0` per path, `pos` a different tree type from `n`, `n = pos` in the comment case, and a guard of `(pos \| n) == 1` that blocks VRP's assertion.  Sections 15, 17, 19 |
+| `ez_strsep` | 156 bytes, 26 words | right size, **4** words | the escape test is two `if`s with a duplicated `memmove`, and the walk carries the read position and advances at the end of each path.  Sections 18 and 19 |
 | OEM source order | `ez_probe_req_handler` mid-file | just before `ez_scan_device_ioctl_handle` | the only interval the DECL_UID oracle scored *negative*; the move also cut `.symtab`'s raw difference from 7,482 to 3,312 bytes |
 | `ez_read_rssi_per_ant_ioctl` | had `precvpriv` | uses `padapter->recvpriv.rssi` | one declaration too many for the oracle, and byte-neutral either way |
 | the 16 uniquifiers | 863/879 | **879/879**, `.strtab` byte-identical | section 11 |
@@ -511,7 +523,7 @@ of the file, against 433,444 at the start of this pass.
 Everything was searched mechanically rather than by hand: `build/oem/gen.py`
 expands a spec's orthogonal axes into whole translation units and
 `build/oem/lab.py` compiles and scores them ten at a time, about thirty a
-second.  Roughly 35,000 variants went through it in this pass.  Two scores
+second.  Roughly 36,000 variants went through it in this pass.  Two scores
 matter and they disagree often: `d`, the size delta, and `s`, the Levenshtein
 distance of the instruction sequences with the register fields blanked out.
 `s` is the one that says whether a shape is right, because a wholesale
@@ -521,31 +533,25 @@ structural.
 ### The three that remain
 
 **43 of the 46 OEM functions are byte-identical** (`build/oem/run.sh`), and so
-are all four public functions the OEM patch distorts.
+are all four public functions the OEM patch distorts.  All three that remain
+are the *right size*; what differs is which register the allocator picked.
 
-| function | delta | what is known |
+| function | differs by | what is known |
 |---|---:|---|
-| `process_config_vars` | -4, edit distance 12 of 86 | One instruction short, and the register allocation still differs at the entry.  The shipped build spills `pick` to the stack and keeps `n` in a callee-saved register across `strlen`/`memcmp` - twelve call-crossing allocnos and three spills; ours has eleven and two, because VRP asserts `n == 0` from the loop guard and rematerialises it.  Everything from the `strlen` call through the comparison now matches instruction for instruction.  Section 17. |
-| `ez_strsep` | +4, 3 instructions | One copy on the loop back edge: an out-of-SSA coalescing tie between the loop PHI's `q` and its `p + 1`.  Section 18. |
-| `ez_new_sc_ioctl` | 20 content, right size | Same seven instructions, two registers swapped.  An IRA preference tie: `rq` and `is_null` both prefer r1 at weight 2000 and cancel, and `rq`'s uncontested weight-125 preference for r2 - from the `add r2, rq, #16` that sets up the third argument - decides.  Unchanged by 1,625 shapes and 23 optimisation flags. |
-
-The two size deltas cancel, which is why `.text` is the right length and the
-raw difference is 3,043 bytes rather than hundreds of thousands.  Fixing
-either one alone would break that, so they have to close together or not at
-all.
+| `process_config_vars` | 49 words of 86 | The register **allocation** now matches: `stm sp, {r2, r3}` at the entry, `pick` on the stack, `buf` in `sl`, twelve call-crossing allocnos and three spills.  That needed `n` live across `strlen`/`memcmp`, which needed VRP's `register_edge_assert_for` not to assert `n == 0` from the loop guard, which the guard `(pos \| n) == 1` achieves (section 17).  What is left is which register IRA gave each value, and one instruction's worth of guard: the shipped build tests against zero with a single `orrs`, and every spelling that blocks the assertion needs a separate compare. |
+| `ez_new_sc_ioctl` | 5 words of 14 | Same seven instructions, two registers swapped.  An IRA preference tie: `rq` and `is_null` both prefer r1 at weight 2000 and cancel, and `rq`'s uncontested weight-125 preference for r2 - from the `add r2, rq, #16` that sets up the third argument - decides.  Unchanged by 1,625 shapes and 23 optimisation flags. |
+| `ez_strsep` | 4 words of 39 | The shipped build routes the delimiter path through the shared `*stringp` store - `add r3, r4, #1` and a branch to the block the end-of-string path also uses - where ours fuses the NUL store into a post-increment (`strb r3, [r4], #1`) and does its own store.  Same instruction count.  Section 18. |
 
 ### Next steps, in the order worth doing them
 
-1. `process_config_vars` needs `n` live across the two calls, which needs VRP's
-   `register_edge_assert_for` not to assert `n == 0` from the loop guard
-   (section 17).  A guard of the form `(pos | n) > 0` or `(pos | n) == 1`
-   *does* block the assertion and *does* produce the shipped register
-   allocation - `stm sp, {r2, r3}` at the entry, `pick` on the stack, `buf` in
-   `sl` - but costs one instruction, because GCC then needs `orr` plus
-   `cmp #1` where the shipped code has a single `orrs`.  The remaining
-   question is what spelling gets both.
-2. `ez_strsep` is one copy; `ez_new_sc_ioctl` is two registers.
-3. `.note.gnu.build-id` will match by itself when the rest does.
+1. `process_config_vars` is the largest of the three and the closest to a
+   named cause: find a spelling of the loop guard that both blocks VRP's
+   assertion and still compares against zero, so the `orr` and the `cmp`
+   fuse back into one `orrs`.  Section 17 lists what has been ruled out.
+2. `ez_strsep` needs the delimiter path to reuse the shared `*stringp` store;
+   the four shapes that produce a shared store all cost more elsewhere.
+3. `ez_new_sc_ioctl` is two registers and the most stubborn of the three.
+4. `.note.gnu.build-id` will match by itself when the rest does.
 
 ---
 
