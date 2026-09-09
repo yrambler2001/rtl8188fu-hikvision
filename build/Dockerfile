@@ -18,8 +18,17 @@ RUN printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-ch
  && apt-get install -y --no-install-recommends \
         build-essential bc bison flex libssl-dev libelf-dev kmod \
         xz-utils curl ca-certificates make patch file \
-        gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi \
     && rm -rf /var/lib/apt/lists/*
+
+# Exact compiler match: the shipped module was built with GCC 6.5.0.
+# kernel.org's crosstool prebuilts provide GCC 6.5.0 / arm-linux-gnueabi (soft-float,
+# matching the original's missing Tag_ABI_VFP_args) with an arm64 host binary,
+# so it runs natively here. "nolibc" is correct - kernel modules are freestanding.
+WORKDIR /opt
+RUN curl -fsSL "https://mirrors.edge.kernel.org/pub/tools/crosstool/files/bin/arm64/6.5.0/arm64-gcc-6.5.0-nolibc-arm-linux-gnueabi.tar.xz" \
+      | tar -xJ && ls /opt
+ENV PATH="/opt/gcc-6.5.0-nolibc/arm-linux-gnueabi/bin:${PATH}"
+RUN arm-linux-gnueabi-gcc --version && arm-linux-gnueabi-gcc -v 2>&1 | tail -3
 
 WORKDIR /build
 RUN curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v4.x/linux-${KVER}.tar.xz" \
