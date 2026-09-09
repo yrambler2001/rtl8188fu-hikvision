@@ -13112,45 +13112,43 @@ int rtw_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	struct iwreq *wrq = (struct iwreq *)rq;
 	int ret = 0;
 
-	switch (cmd) {
 #ifdef CONFIG_EZ_WIFI
-	case EZ_NEW_SMART_CONFIG_IO:
+	/* The vendor dispatches its private ioctls from an if/else-if chain ahead
+	 * of the switch, not as cases inside it: the shipped module tests the
+	 * seven EZ_* command numbers linearly and only then enters the decision
+	 * tree GCC builds for the Realtek cases. */
+	if (cmd == EZ_NEW_SMART_CONFIG_IO) {
 		printk("EZ_NEW_SMART_CONFIG_IO \n");
 		if (dev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP)
 			ret = ez_new_sc_ioctl(dev, rq, cmd);
 		else
 			ret = EINVAL;
-		break;
-	case EZ_IOCTL_SET_NEW_SC:
+	} else if (cmd == EZ_IOCTL_SET_NEW_SC) {
 		printk("EZ_IOCTL_SET_NEW_SC \n");
 		if (dev->ieee80211_ptr->iftype == NL80211_IFTYPE_STATION)
 			ret = ez_new_sc_ioctl_handle(dev, rq, cmd);
 		else
 			ret = EINVAL;
-		break;
-	case EZ_IOCTL_SCAN_IO:
+	} else if (cmd == EZ_IOCTL_SCAN_IO) {
 		printk("EZ_IOCTL_SCAN_IO \n");
 		if (dev->ieee80211_ptr->iftype == NL80211_IFTYPE_STATION)
 			ret = ez_scan_device_ioctl_handle(dev, rq, cmd);
 		else
 			ret = EINVAL;
-		break;
-	case EZ_IOCTL_DEVINFO_IO:
+	} else if (cmd == EZ_IOCTL_DEVINFO_IO) {
 		printk("EZ_IOCTL_DEVINFO_IO \n");
 		ret = ez_device_info_ioctl_handle(dev, rq, cmd);
-		break;
-	case EZ_IOCTL_READ_RSSI_PER_ANT:
+	} else if (cmd == EZ_IOCTL_READ_RSSI_PER_ANT) {
 		printk("EZ_IOCTL_READ_RSSI_PER_ANT \n");
 		ret = ez_read_rssi_per_ant_ioctl(dev, rq, cmd);
-		break;
-	case EZ_IOCTL_WIFI_FUNC_POLL:
+	} else if (cmd == EZ_IOCTL_WIFI_FUNC_POLL) {
 		printk("EZ_IOCTL_WIFI_FUNC_POLL \n");
 		ret = ez_wifi_func_poll_ioctl_handle(dev, rq, cmd);
-		break;
-	case EZ_IOCTL_RF_CALIBRATION_CHECK:
+	} else if (cmd == EZ_IOCTL_RF_CALIBRATION_CHECK) {
 		ret = ez_wifi_module_rf_calibration_check_ioctl(dev, rq, cmd);
-		break;
+	} else
 #endif /* CONFIG_EZ_WIFI */
+	switch (cmd) {
 #ifdef CONFIG_IOCTL_WEXT
 	case RTL_IOCTL_WPA_SUPPLICANT:
 		ret = wpa_supplicant_ioctl(dev, &wrq->u.data);

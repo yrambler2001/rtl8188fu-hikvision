@@ -212,6 +212,8 @@ def main():
     ap.add_argument('--shipped', required=True)
     ap.add_argument('--obj', action='append', default=[])
     ap.add_argument('--fn')
+    ap.add_argument('--also', action='append', default=[],
+                    help='also score this (public) function, by name')
     ap.add_argument('--catalogue', action='store_true')
     ap.add_argument('-v', '--verbose', action='store_true')
     a = ap.parse_args()
@@ -222,6 +224,11 @@ def main():
         return 0
 
     funcs = oem_funcs(ship.e)
+    for n in a.also:
+        for sym in ship.e.syms:
+            if sym['name'] == n and sym['type'] == 2:
+                funcs.append((n, sym['value'], sym['size'], '(public)'))
+                break
     total = sum(s for _, _, s, _ in funcs)
     allrows = []
     ok = bad = miss = 0

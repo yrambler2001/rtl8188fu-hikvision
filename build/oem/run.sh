@@ -19,8 +19,14 @@ set -e
 : "${TOOLCHAIN_BIN:=/opt/gcc-6.5.0-vendor/arm-linux-gnueabi/bin}"
 [ -x "$TOOLCHAIN_BIN/arm-linux-gnueabi-gcc" ] && { PATH="$TOOLCHAIN_BIN:$PATH"; export PATH; }
 
-CMD=$SRC/core/.rtw_mlme.o.cmd
-[ -f "$CMD" ] || { echo "!! no $CMD - run a full build first" >&2; exit 1; }
+# Compile flags come from the last real build's .rtw_mlme.o.cmd, so they track
+# the Makefile automatically.  Prefer the vendor-path build (build-vendorpath.sh)
+# over a plain /src build, because only that one carries -DCONFIG_EZ_WIFI.
+VENDOR_ROOT=${VENDOR_ROOT:-/data1/jiangqifeng6/work/tongyibianyi/develop_branch/wifi/rtl8188FU_linux_v5.15.3-6-g1a2e952f9.20230217}
+for c in "$VENDOR_ROOT/core/.rtw_mlme.o.cmd" "$SRC/core/.rtw_mlme.o.cmd"; do
+    [ -f "$c" ] && { CMD=$c; break; }
+done
+[ -n "$CMD" ] || { echo "!! no core/.rtw_mlme.o.cmd - run a full build first" >&2; exit 1; }
 
 FLAGS=$(head -1 "$CMD" | sed -e 's/^[^=]*:= *//' \
                              -e 's/^[^ ]*gcc //' \

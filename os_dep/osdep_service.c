@@ -474,7 +474,31 @@ nodata:
 inline struct sk_buff *_rtw_skb_alloc(u32 sz)
 {
 #ifdef PLATFORM_LINUX
+#ifdef CONFIG_EZ_WIFI
+	/* The vendor open-codes 4.9's __netdev_alloc_skb() for the small-RX case
+	 * with the guard inverted: upstream takes the __alloc_skb() path when the
+	 * length is *large*, this takes it when the length is small and sends
+	 * everything else out of line -- "don't burn a page-frag cache entry on a
+	 * small RX skb", which is what you would do on a memory-tight camera.
+	 * Reconstructed instruction by instruction from the shipped module; see
+	 * FINDINGS-byte-gap.md section 4.1. */
+	struct sk_buff *skb;
+
+	if (sz <= 1024) {
+		skb = __alloc_skb(sz + NET_SKB_PAD,
+				  in_interrupt() ? GFP_ATOMIC : GFP_KERNEL,
+				  SKB_ALLOC_RX, NUMA_NO_NODE);
+		if (skb) {
+			skb_reserve(skb, NET_SKB_PAD);
+			skb->dev = NULL;
+		}
+		return skb;
+	}
+
 	return __dev_alloc_skb(sz, in_interrupt() ? GFP_ATOMIC : GFP_KERNEL);
+#else
+	return __dev_alloc_skb(sz, in_interrupt() ? GFP_ATOMIC : GFP_KERNEL);
+#endif /* CONFIG_EZ_WIFI */
 #endif /* PLATFORM_LINUX */
 
 #ifdef PLATFORM_FREEBSD

@@ -1188,14 +1188,15 @@ _non_rc_device:
 #endif
 
 #ifdef CONFIG_EZ_WIFI
-	if (ez_new_sc.enable && ez_new_sc.done == 0
-	    && (len - WLAN_HDR_A3_LEN) > 255)
+	if (ez_new_sc.enable && ((ez_new_sc.done == 0)
+				 & ((len - WLAN_HDR_A3_LEN) > 255)))
 		ez_probe_req_handler(pframe, len);
 
 	ez_ret = ez_probe_requst_eid208_handler(pframe, len);
 	if (ez_ret > 0) {
 		ez_ret = rtw_ezviz_ie_set(padapter, WIFI_PROBERESP_VENDOR_IE_BIT,
-					  (u8 *)&probe_resp_t, probe_resp_t.element_len + 2);
+					  (u8 *)&probe_resp_t,
+					  (u8)(probe_resp_t.element_len + 2));
 		printk("rtw_vendor_ie_set,ret:%d!!!\n", ez_ret);
 	} else if (pmlmepriv->vendor_ielen[0])
 		rtw_ezviz_ie_set(padapter, WIFI_PROBERESP_VENDOR_IE_BIT, NULL, 0);

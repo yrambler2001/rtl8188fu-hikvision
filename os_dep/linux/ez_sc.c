@@ -11,7 +11,7 @@
 #include <drv_types.h>
 #include <ez_wifi.h>
 
-s8 err_status;
+static s8 err_status;
 u8 smart_flg;
 u8 scan_flag;
 struct ez_new_sc_t ez_new_sc;
