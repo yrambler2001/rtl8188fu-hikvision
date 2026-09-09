@@ -407,30 +407,35 @@ int ez_atox(char *s)
 char *ez_strsep(char **stringp, char delim, char esc)
 {
 	char *s = *stringp;
-	char *p;
+	char *p, *q;
 	char c;
 
 	if (s == NULL)
 		return s;
 
 	if (*s == '\0')
-		return (char *)(unsigned char)*s;
+		return NULL;
 
 	p = s;
 	for (;;) {
+		q = p;
 		c = *p++;
-		if (c == '\0')
-			break;
-		if (c == esc && (*p == esc || *p == delim)) {
-			memmove(p - 1, p, strlen(p - 1));
-		} else if (c == delim) {
-			p[-1] = '\0';
-			break;
+		if (c == '\0') {
+			*stringp = NULL;
+			return s;
+		}
+		if (c == esc) {
+			if (*p == esc || *p == delim) {
+				memmove(q, p, strlen(q));
+				continue;
+			}
+		}
+		if (c == delim) {
+			*q = '\0';
+			*stringp = q + 1;
+			return s;
 		}
 	}
-	*stringp = p;
-
-	return s;
 }
 
 int ez_mac2u8(u8 *mac, const char *s, char *end)
