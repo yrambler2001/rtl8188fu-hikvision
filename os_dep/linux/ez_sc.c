@@ -508,7 +508,28 @@ int ez_scan_device_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cm
 		probe_req_t.sync[3] = 'I';
 		probe_req_t.sync[4] = 'Z';
 		probe_req_t.id = 0x6990;
-		goto trig_scan;
+		if (len) {
+			probe_req_t.len = len;
+			memcpy(probe_req_t.value, sc.value, len);
+		}
+		if (!probe_req_t.len) {
+			ret = 0;
+			break;
+		}
+		printk("element:%d\r\n", 208);
+		printk("element len:%d\r\n", probe_req_t.element_len);
+		printk("ID:0x%x\r\n", probe_req_t.id);
+		printk("sync: %c%c%c%c%c\r\n", probe_req_t.sync[0], probe_req_t.sync[1],
+		       probe_req_t.sync[2], probe_req_t.sync[3], probe_req_t.sync[4]);
+		printk("value len:%d,value:%s\r\n", probe_req_t.len, probe_req_t.value);
+		memset(&probe_resp_t, 0, sizeof(probe_resp_t));
+		ret = rtw_ezviz_ie_set(padapter, WIFI_PROBEREQ_VENDOR_IE_BIT,
+				       (u8 *)&probe_req_t,
+				       (u8)(probe_req_t.element_len + 2));
+		printk("rtw_vendor_ie_set,ret:%d!!!\n", ret);
+		rtw_set_802_11_bssid_list_scan(padapter, NULL);
+		scan_flag = 1;
+		break;
 
 	case POLL_DEVICE:
 		printk("cmd POLL_DEVICE,sizeof(cmd):%d!\n", sizeof(sc));
@@ -528,7 +549,6 @@ int ez_scan_device_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cm
 		probe_req_t.sync[3] = 'I';
 		probe_req_t.sync[4] = 'Z';
 		probe_req_t.id = 0x6992;
-trig_scan:
 		if (len) {
 			probe_req_t.len = len;
 			memcpy(probe_req_t.value, sc.value, len);
