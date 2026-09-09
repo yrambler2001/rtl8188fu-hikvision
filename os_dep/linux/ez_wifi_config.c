@@ -128,7 +128,7 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 		if (buf[i] == '\r')
 			continue;
 
-		if (n || pos) {
+		if ((pos | n) == 1) {
 			if (buf[i] == '\n') {
 				if (n) {
 					n = 0;
@@ -142,7 +142,7 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 		}
 
 		if (buf[i] == '#') {
-			n |= pos;
+			n = pos;
 			pos = 1;
 			continue;
 		}
@@ -547,18 +547,20 @@ char *ez_strsep(char **stringp, char delim, char esc)
 	p = s;
 	for (;;) {
 		q = p;
-		c = *p++;
+		c = *q;
 		if (c == '\0') {
 			*stringp = NULL;
 			return s;
 		}
 		if (c == esc) {
-			if (*p == esc) {
-				memmove(q, p, strlen(q));
+			if (q[1] == esc) {
+				memmove(q, q + 1, strlen(q));
+				p = q + 1;
 				continue;
 			}
-			if (*p == delim) {
-				memmove(q, p, strlen(q));
+			if (q[1] == delim) {
+				memmove(q, q + 1, strlen(q));
+				p = q + 1;
 				continue;
 			}
 		}
@@ -567,6 +569,7 @@ char *ez_strsep(char **stringp, char delim, char esc)
 			*stringp = q + 1;
 			return s;
 		}
+		p = q + 1;
 	}
 }
 
