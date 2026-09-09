@@ -279,6 +279,11 @@ driver files. The reconstruction above is exact enough to be dropped into WP-D a
 
 ### 4.2 `rtw_efuse_analyze` - 4 bytes, hypothesis disproved
 
+> **CLOSED.** The analysis below is correct about the mechanism but wrong about
+> the cause. The vendor's one added line in `core/efuse/rtw_efuse.c` is not a
+> line that shifts register pressure - it is a **brace**, and adding it makes
+> the function byte-identical. See `FINDINGS-oem-catalogue.md` section 14.
+
 Normalising away literal-pool distances and branch displacements, **591 of 634
 instructions are identical**. Every difference except one window is a `bl` displacement.
 The one real difference is a six-instruction window at the end of the function: the shipped
@@ -321,6 +326,7 @@ is present. There is no code difference. Nobody should investigate this again.
   other number in this note still stands as written.
 * `_rtw_skb_alloc` (4.1) - two hypotheses, no evidence that separates them.
 * `rtw_efuse_analyze` (4.2) - 4 bytes, cause unknown, previous explanation ruled out.
+  **(Since closed - see the note at the head of 4.2.)**
 * `.note.gnu.build-id` is an SHA-1 over the linked module. It cannot match until everything
   else does, and it will match automatically when they do. It is listed for completeness.
 * The `derived` bucket - 20,896 bytes of `.strtab` churn from GCC's local-symbol
