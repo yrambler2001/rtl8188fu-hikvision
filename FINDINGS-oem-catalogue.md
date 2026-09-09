@@ -1086,9 +1086,10 @@ all produce the branch.
 
 ---
 
-## 18. `ez_strsep`: TER puts the add on the wrong side of the store
+## 18. `ez_strsep`: TER puts the add on the wrong side of the store - closed
 
-Two things were wrong; one is now right.
+Three things were wrong; all three are now right and the function is
+byte-identical.
 
 **Block layout.**  Writing `if (*p == esc || *p == delim)` as two separate
 `if`s, each with its own `memmove(q, p, strlen(q)); continue;`, reproduces the
@@ -1096,10 +1097,10 @@ shipped block order exactly.  Cross-jumping merges the two copies again and
 keeps the *earlier* one, which is what puts the `*p == delim` test after the
 memmove block (section 12).
 
-**The last four words** are the delimiter path's `*stringp` store:
+**The delimiter path's last four words.**  The shipped is
 
 ```
-	shipped                        ours
+	shipped                        ours (before)
  140	mov  r2, #0                    mov  r3, #0
  144	add  r3, r4, #1                strb r3, [r4], #1
  148	strb r2, [r4]                  str  r4, [r7]
@@ -1114,8 +1115,8 @@ cross-jumps onto it.  That is only possible because the address is computed
 *before* the NUL store, so `q` is still live at the store and cannot share a
 register with `q + 1`.
 
-Ours computes it after, and then it fuses.  The chain, all three passes
-confirmed in their own dumps:
+The chain that stopped it, all three passes read out of GCC 6.5.0's own source
+and confirmed in their own dumps:
 
 1. **TER** (`tree-ssa-ter.c`, run inside `expand`) replaces an expression into
    its use when `ssa_is_replaceable_p` holds - which requires, among other
@@ -1125,32 +1126,77 @@ confirmed in their own dumps:
    `t_129 = p_110 + 1`.
 2. **`auto_inc_dec`** scans each block *backwards* (`merge_in_block`), keeping
    `reg_next_inc_use[reg]`, and `find_inc` looks only for an inc that comes
-   *after* the memory reference.  With the add after the store it finds it,
-   `try_merge` prices the pair at 8 against 8 - `old_cost < new_cost` is false
-   on a tie, so it fires - and `-fdump-rtl-auto_inc_dec-details` prints
-   `found post add(77)`, `****success 76: [r129:SI++]=r127`.
+   *after* the memory reference (FORM_POST_ADD).  With the add after the store
+   it finds it, `try_merge` prices the pair at 8 against 8 - `old_cost <
+   new_cost` is false on a tie, so it fires - and
+   `-fdump-rtl-auto_inc_dec-details` prints `found post add(77)`,
+   `****success 76: [r129:SI++]=r127`.
 3. The value is then in `q`'s own register, so the two `*stringp` stores are
    `str r4, [r7]` and `str r3, [r7]`, and cross-jumping cannot merge them.
 
-Turning the pass off (`-fno-auto-inc-dec`, a control only - the vendor's flags
-are fixed) gives `add r4, r4, #1 ; strb r3, [r4, #-1]`, i.e. the right order
-but the wrong registers, and costs two instructions in the loop, where the
-same pass produces the shipped `ldrb r3, [r5], #1`.
+### Which of the two passes actually decides it
 
-So the open question is narrow: a spelling in which `q + 1` has **two** uses,
-or lives in a different basic block from `*q = '\0'`, so TER leaves it where
-the source put it.  Ruled out, all compiled and scored: the store order both
-ways; a named temporary; `p = q + 1` before or after; `*q++ = '\0'`;
-`*stringp = ++q`; `q += 1`; `&q[1]`; `q + sizeof(char)`; a cast through
-`unsigned long`; `(*stringp)++`; carrying the walk pointer four different ways;
-`char` and `u8` for the character; `for(;;)` and `while(1)`; and - the two that
-do block TER - advancing `p` before the delimiter test (which removes the add
-entirely, because the value is then the loop's own `p`) and breaking out to a
-single `*stringp = r` after the loop (which puts the epilogue at the end of the
-function instead of at offset 64, because the shared tail has to be *duplicated*
-source for cross-jumping to keep the earlier copy - section 19).
+`auto-inc-dec.c` has a `dbg_cnt (auto_inc_dec)`, so the fold can be blocked
+*per site* without touching anything else.  There are exactly three folds in
+this translation unit before `ez_strsep`'s delimiter path, so
+`-fdbg-cnt=auto_inc_dec:2` blocks that one and keeps the loop's shipped
+`ldrb r3, [r5], #1`.  **It is not enough.**  The result is
 
----
+```
+	mov r3, #0 ; add r4, r4, #1 ; strb r3, [r4, #-1] ; str r4, [r7]
+```
+
+- five instructions and four bytes too long, because with the add still
+*after* the store `q` dies at the add, IRA gives the add's result q's own
+register, and post-reload the pair is rewritten with a -1 displacement.
+
+What *is* enough is putting the add before the store and keeping it there:
+with the temporary written first and `-fno-tree-ter`, the function is
+byte-identical - `n=0, d=+0`.  Then the post-reload scheduler emits
+`mov`, `add`, `strb` in the shipped order (with `-fno-schedule-insns2` the pair
+comes out `strb` then `add`), and cross-jumping merges the tail.
+
+### The source-level lever
+
+`ssa_is_replaceable_p` plus `ter_is_replaceable_p` and
+`find_replaceable_in_bb`'s own checks leave exactly four source-level ways to
+stop the sink:
+
+| lever | why it was not used |
+|---|---|
+| a second immediate use of `q + 1` | no zero-cost second use exists: `r[-1] = 0` and `*(r - 1) = 0` are folded back to `*q` by forwprop, a second `*stringp = r` is removed by DSE, `p = r` and `q = r` are dead or copy-propagated, and every comparison against `q`, `s` or `NULL` either folds or costs a branch |
+| the single use is a PHI | needs a merge point, which puts the shared `str` at the end of the function instead of at offset 64 (section 19) - unless the source carries a label in the middle of the loop body, which does reproduce the bytes but is a much larger deviation |
+| the use is in another basic block | same: GCC 6 merges a block with its single-predecessor successor even across a user label (`gimple_can_merge_blocks_p` only refuses `FORCED_LABEL`), so this collapses to the previous row |
+| **volatile operands on the use statement** | used: `find_replaceable_in_bb` calls `finished_with_expr` when `gimple_has_volatile_ops (stmt)` holds for the statement that *uses* the tracked expression |
+
+So the reconstruction writes the delimiter arm as
+
+```c
+		if (c == delim) {
+			r = q + 1;
+			*q = '\0';
+			*(char * volatile *)stringp = r;
+			return s;
+		}
+```
+
+and that is byte-identical.  The `volatile` is a compile-time device only: it
+does not survive to the output, because cross-jumping merges this store with
+the non-volatile `*stringp = NULL` of the end-of-string path into the single
+`str r3, [r7]` at offset 64.  **This is a reconstruction, not recovered vendor
+text.**  What is recovered from the binary is the *property*: the vendor's
+build did not sink `q + 1` past the NUL store.  Their spelling is not
+determined by the bytes - a `goto`-to-a-mid-loop-label form reproduces them
+too.
+
+Ruled out, all compiled and scored: the store order both ways; a named
+temporary; `p = q + 1` before or after; `*q++ = '\0'`; `*stringp = ++q`;
+`q += 1`; `&q[1]`; `q + sizeof(char)`; a cast through `unsigned long`;
+`(*stringp)++`; carrying the walk pointer four different ways; `char` and `u8`
+for the character; `for(;;)` and `while(1)`; advancing `p` before the delimiter
+test (which removes the add entirely, because the value is then the loop's own
+`p`, and costs four bytes); and the `r[-1]`, double-store, `q = r` and
+`(unsigned long)` round-trip spellings above.
 
 ## 19. A shared tail is duplicated source
 
@@ -1300,15 +1346,15 @@ symbol - `build/oem/align.py` and a bare `cmp` are enough.
 
 ---
 
-## 21. `ez_new_sc_ioctl`: the IRA numbers, printed
+## 21. `ez_new_sc_ioctl`: the IRA numbers, and the decision they hang on
 
 Five words of fourteen, and the whole difference is which of two allocnos gets
 r1.  `-fira-verbose=9` (10 sends the same text to stderr instead of the dump
 file) prints the entire state of this function:
 
 ```
-  a0(r124,l0) costs: GENERAL_REGS:0 MEM:20000
-  a1(r116,l0) costs: GENERAL_REGS:0 MEM:30000
+  a0(r124,l0) costs: GENERAL_REGS:0 MEM:20000       <- is_null, 2 references
+  a1(r116,l0) costs: GENERAL_REGS:0 MEM:30000       <- rq,      3 references
 ;; a0(r124,l0) conflicts: a1(r116,l0)
 ;;     total conflict hard regs: 0 2
 ;; a1(r116,l0) conflicts: a0(r124,l0)
@@ -1316,6 +1362,8 @@ file) prints the entire state of this function:
   pref0:a0(r124)<-hr1@2000
   pref1:a1(r116)<-hr1@2000
   pref2:a1(r116)<-hr2@125
+      Pushing a0(r124,l0)(cost 0)
+      Pushing a1(r116,l0)(cost 0)
       Popping a1(r116,l0)  -- assign reg 2
       Popping a0(r124,l0)  -- assign reg 1
 ```
@@ -1329,17 +1377,79 @@ is subtracted from the full cost and the two cancel exactly.  What is left is
 destination is the hard argument register, so IRA records a copy between them.
 r2 therefore wins by 125 and `rq` moves there, costing `mov r2, r1` at the top.
 
-The shipped build does the opposite - `rq` stays in r1, `is_null` goes to r3,
-and the second argument is set up with `mov r1, r3` after `add r2, r1, #16`.
-Both are eight instructions; only the assignment differs.
+### The decision is the *push order*, and the push order is the reference count
 
-To flip it, either `rq` must not die in that add (nothing in the source keeps
-it live: the address is its last use and the call is a sibcall) or `is_null`
-must want r1 less.  Swept and unmoved: five spellings of the third argument
-(`&wrq->u.data`, `&((struct iwreq *)rq)->u.data`, `&(wrq->u).data`, a named
-`struct iw_point *`, `(struct iw_point *)((char *)rq + 16)`); seven types for
-the flag; four spellings of the null test; guard clause, `if`/`else`, a `ret`
-variable, `goto`; passing a literal `0` as the second argument instead of the
-flag (identical code); computing the address before and after the branch; a
-`static` helper for the test; and `unlikely()` / `__builtin_expect` on the
-branch, which does not move the block frequencies enough to change the tie.
+The 125 only decides anything because **`rq` is popped first**.  `Popping` is
+`push_allocnos_to_stack` unwinding a stack that `push_only_colorable` filled
+from the head of a bucket sorted by `bucket_allocno_compare_func`, whose first
+key is `ALLOCNO_COLOR_DATA (t)->thread_freq` - and `init_allocno_threads` sets
+that to `ALLOCNO_FREQ`, which `create_insn_allocnos` accumulates as
+`REG_FREQ_FROM_BB` per *reference*.  At `-Os` `REG_FREQ_FROM_BB` is the
+constant `REG_FREQ_MAX` = 1000 for every block, so **`ALLOCNO_FREQ` is exactly
+1000 x the number of times the pseudo appears in the RTL**.  The allocno with
+the *lower* frequency sorts to the head, is pushed first, and is therefore
+coloured **last**.
+
+`rq` appears three times (the parameter copy, the null test, the address add);
+`is_null` twice (the cstore that defines it, the argument move).  3000 beats
+2000, so `is_null` is pushed first and `rq` is coloured first - and takes r2.
+
+Reverse it and the shipped assignment falls out, with no other change:
+
+```
+  a0(r124,l0) costs: ... MEM:40000        <- is_null, 4 references
+  a1(r116,l0) costs: ... MEM:30000
+      Pushing a1(r116,l0)(cost 0)
+      Pushing a0(r124,l0)(cost 0)
+      Popping a0(r124,l0)  -- assign reg 3
+      Popping a1(r116,l0)  -- assign reg 1
+```
+
+`is_null` is coloured first; its hr1@2000 is cancelled by `rq`'s, which is
+still unassigned, so every profitable register costs the same and it takes the
+first in ARM's `REG_ALLOC_ORDER` - which is `3, 2, 1, 0, 12, 14, ...`, and r0
+and r2 conflict, so r3.  Then `rq` is coloured with no unassigned conflicting
+neighbour left, its hr1@2000 stands unopposed, and it keeps r1.  That is
+`ez_new_sc_ioctl` byte-identical: `n=0, d=+0`.  Equality is *not* enough -
+with three references each the tie-break leaves the order as it was and
+nothing changes.
+
+### What is still open
+
+The construction above was demonstrated with two `__asm__ __volatile__("" ::
+"r"(is_null))` statements, which emit nothing but count as references.  **No
+ordinary-C spelling has been found that adds them.**  What was tried and
+measured (each printed the *identical* IRA state - same two allocnos, same two
+reference counts, same preferences, same push order):
+
+* seven types for the flag, and a second flag variable of a different type
+  (`unsigned int`, `u32`, `s32`, `u8`, `long`) copied from it - every one of
+  those conversions is `useless_type_conversion_p` or is folded away by VRP
+  because the value's range is [0,1], so no statement survives to expand;
+* the flag written as a diamond (`is_null = 0; if (...) is_null = 1;`) and as
+  its inverse - `phiopt`'s `conditional_replacement` collapses `PHI <0, 1>`
+  back to the comparison;
+* `return -is_null;` in the error arm - VRP asserts `is_null != 0` on that
+  edge, its range is [0,1], so the value is 1 and it folds back to `-1`;
+* a repeated `if (is_null) return -1;` after the guard - VRP deletes it;
+* the pointer round trips (`(unsigned long)rq`, `(struct iwreq *)(unsigned
+  long)rq`, the address computed as `(struct iw_point *)((unsigned long)rq +
+  16)`), five spellings of the third argument, four of the null test, guard
+  clause / `if`-`else` / a `ret` variable / `goto`, and the address computed
+  before and after the branch.
+
+Two further routes are closed by mechanism rather than by sweeping:
+
+* **Removing a reference from `rq` instead.**  Its three are the parameter
+  copy, the test and the add.  `combine` eliminates a parameter copy only when
+  the pseudo dies in the insn it is substituted into - which is why `dev`'s
+  copy disappears (its only surviving use is the compare, in the same block)
+  and `rq`'s does not (the address add is in another block).  Moving the add
+  into the first block makes both uses local and does remove the allocno
+  entirely, but then the add is emitted before the branch, which is four bytes
+  and one instruction away from the shipped layout.
+* **Block frequencies.**  `REG_FREQ_FROM_BB` is the constant `REG_FREQ_MAX`
+  whenever `optimize_function_for_size_p`, which is unconditionally true at
+  `-Os`.  A reference in the cold error arm and a reference on the hot path
+  contribute identically, so `unlikely()` / `__builtin_expect` cannot move this
+  tie at all - not "not enough", but not at all.
