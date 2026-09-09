@@ -978,9 +978,9 @@ IOR whose two operands are single-use temporaries blocks the whole thing:
 	if ((pos | n) | (pos & n)) {
 ```
 
-`pos & n` is always zero here (the two flags are never both set), so the value
-is unchanged; `combine` folds `(a | b) | (a & b)` back to `a | b`, so the RTL is
-still one `orrs` compared against zero.  That last part matters twice over,
+`(a | b) | (a & b) == a | b` is a bitwise identity, so this is value-preserving
+for *any* operands, not just for two flags that are never both set; and
+`combine` folds it back, so the RTL is still one `orrs` compared against zero.  That last part matters twice over,
 because it is what lets `cse1` replace `mov rX, #0` on the main path with
 `mov rX, r9` - the shipped `moveq r6, r4`, `moveq r4, r9`, `movne r4, r9`.
 
