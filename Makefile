@@ -59,7 +59,7 @@ CONFIG_GSPI_HCI = n
 CONFIG_AP_MODE = y
 CONFIG_P2P = y
 CONFIG_MP_INCLUDED = n
-CONFIG_POWER_SAVING = y
+CONFIG_POWER_SAVING = n
 CONFIG_IPS_MODE = default
 CONFIG_LPS_MODE = default
 CONFIG_USB_AUTOSUSPEND = n
@@ -73,7 +73,7 @@ CONFIG_LOAD_PHY_PARA_FROM_FILE = y
 CONFIG_TXPWR_BY_RATE = y
 CONFIG_TXPWR_BY_RATE_EN = y
 CONFIG_TXPWR_LIMIT = y
-CONFIG_TXPWR_LIMIT_EN = n
+CONFIG_TXPWR_LIMIT_EN = y
 CONFIG_RTW_REGDB = rtk
 ########################## Initial Channel Plan  ##########################
 # XX: unspecified
@@ -100,11 +100,16 @@ CONFIG_BR_EXT = y
 CONFIG_TDLS = n
 CONFIG_WIFI_MONITOR = n
 CONFIG_MCC_MODE = n
-CONFIG_APPEND_VENDOR_IE_ENABLE = n
+CONFIG_APPEND_VENDOR_IE_ENABLE = y
 CONFIG_RTW_NAPI = y
 CONFIG_RTW_GRO = y
 CONFIG_RTW_NETIF_SG = y
 CONFIG_RTW_IPCAM_APPLICATION = y
+# Not a stock Realtek switch: CONFIG_AUTO_NOTCH_FILTER is referenced by
+# hal/rtl8188f/rtl8188f_phycfg.c but defined nowhere in the tarball. The shipped
+# module's phy_SpurCalibration_8188F is 220 bytes shorter than ours - exactly the
+# 14 odm_set_bb_reg(0xC40, ...) calls that #ifndef CONFIG_AUTO_NOTCH_FILTER guards.
+CONFIG_AUTO_NOTCH_FILTER = y
 CONFIG_RTW_REPEATER_SON = n
 CONFIG_ICMP_VOQ = n
 CONFIG_IP_R_MONITOR = n #arp VOQ and high rate
@@ -1178,7 +1183,11 @@ endif
 ifeq ($(CONFIG_LOAD_PHY_PARA_FROM_FILE), y)
 EXTRA_CFLAGS += -DCONFIG_LOAD_PHY_PARA_FROM_FILE
 #EXTRA_CFLAGS += -DREALTEK_CONFIG_PATH_WITH_IC_NAME_FOLDER
-EXTRA_CFLAGS += -DREALTEK_CONFIG_PATH=\"/lib/firmware/\"
+# Realtek's default is /lib/firmware/. The shipped module's rtw_phy_file_path
+# points at "/dav/" instead - the Hikvision application directory - so the
+# vendor overrode it. Same override mechanism as USER_EFUSE_MAP_PATH above.
+USER_CONFIG_PATH ?= /dav/
+EXTRA_CFLAGS += -DREALTEK_CONFIG_PATH=\"$(USER_CONFIG_PATH)\"
 endif
 
 ifeq ($(CONFIG_TXPWR_BY_RATE), n)
@@ -1205,6 +1214,10 @@ else ifeq ($(CONFIG_TXPWR_LIMIT_EN), y)
 EXTRA_CFLAGS += -DCONFIG_TXPWR_LIMIT_EN=1
 else ifeq ($(CONFIG_TXPWR_LIMIT_EN), auto)
 EXTRA_CFLAGS += -DCONFIG_TXPWR_LIMIT_EN=2
+endif
+
+ifeq ($(CONFIG_AUTO_NOTCH_FILTER), y)
+EXTRA_CFLAGS += -DCONFIG_AUTO_NOTCH_FILTER
 endif
 
 ifneq ($(CONFIG_RTW_COUNTRY_CODE), XX)
@@ -1446,9 +1459,11 @@ endif
 ifeq ($(CONFIG_PLATFORM_GENERIC_ARM), y)
 # Generic ARMv7 Linux target, added for the reproduction build.
 # Mirrors the shipped module: platform/platform_ops.o only, cfg80211, little endian.
+# CONFIG_PLATFORM_OPS is deliberately NOT defined: it is the #ifndef guard in
+# platform/platform_ops.c around the default platform_wifi_power_on/off stubs,
+# and the shipped module contains both of them as real FUNC symbols.
 EXTRA_CFLAGS += -DCONFIG_LITTLE_ENDIAN
 EXTRA_CFLAGS += -DCONFIG_IOCTL_CFG80211 -DRTW_USE_CFG80211_STA_EVENT
-EXTRA_CFLAGS += -DCONFIG_PLATFORM_OPS
 ARCH ?= arm
 CROSS_COMPILE ?= arm-linux-gnueabi-
 KSRC ?= /build/linux

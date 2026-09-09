@@ -132,4 +132,8 @@ def main():
         ex=sorted(pairfns[(mine,orig)])[0]
         print(f"  {mine:>6} -> {orig:>6}   [{orig-mine:+6}]  {c:>5}  {ex}")
     print(f"\nfunctions with exactly 1 differing word: {sum(1 for v in per_fn_res.values() if v==1)}")
+    if per_fn_res:
+        print("\nsame-size functions that still differ  (differing words, name)")
+        for fn, v in per_fn_res.most_common(60):
+            print(f"  {v:>5}  {fn}")
 main()

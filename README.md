@@ -54,15 +54,19 @@ Byte-exact for the whole module is not reachable (see below), but with the
 |---|---|
 | `vermagic` | **exact match** — `4.9.129 mod_unload ARMv7 p2v8` |
 | ARM ELF attributes | **identical** (all 15 tags) |
+| `.modinfo` | **byte-identical** (9,246 bytes: params, descriptions, alias, version) |
 | compiled source files | **157 / 159** (missing only the two OEM files) |
-| function symbols present | **3872 / 3939 = 98.3%** |
-| same-size functions | **3497 / 3872 = 90.3%** |
-| **byte-identical functions** | **2570 = 65.2% of the module, 43.4% of `.text`** |
-| module size | 1,904,016 vs 1,918,056 shipped (−0.7%) |
+| function symbols present | **3893 / 3939 = 98.8%** (the 46 missing are all OEM) |
+| function symbols we build that the shipped module lacks | **0** |
+| same-size functions | **3886** |
+| **byte-identical functions** | **3882 = 98.6% of the module, 97.3% of `.text`** |
+| module size | 1,890,468 vs 1,918,056 shipped (−1.4%, all OEM code) |
 
 Those figures are against the **Fullhan vendor kernel** (`build/Dockerfile.vendor`,
-`FINDINGS-vendor-kernel.md`). Against a stock kernel.org 4.9.129 the same source
-gives 3817 symbols / 3038 same-size / 2181 byte-identical (55.4%).
+`FINDINGS-vendor-kernel.md`) with the recovered driver configuration
+(`FINDINGS-driver-config.md`). Against a stock kernel.org 4.9.129 the same source gave
+3817 symbols / 3038 same-size / 2181 byte-identical (55.4%); with the vendor kernel but
+the wrong driver `#ifdef`s, 2570 (65.2%).
 
 "Byte-identical" masks two things that encode link layout rather than code:
 relocated operands, and ARM `B`/`BL` displacements the assembler resolved
@@ -88,8 +92,9 @@ rather than an approximation:
 
 ### What still differs, and why
 
-Of the 857 functions that are the right size but not bit-identical, the
-differing instruction words classify as:
+Four functions are the right size but not bit-identical, and seven differ in size.
+That is down from 857 same-size-but-differing at the start of the vendor-kernel work,
+where the differing instruction words classified as:
 
 | share | kind |
 |---:|---|
@@ -100,9 +105,12 @@ differing instruction words classify as:
 
 A load/store that differs *only* in its immediate offset is a struct field at a
 different offset. That was the signature of **different kernel headers** — the
-vendor's patched 4.9.129 tree and its `.config`. Building against that tree removed
-every kernel-header offset family; what survives is a single driver-side one, a
-+1312-byte `struct mlme_priv`. See `FINDINGS-vendor-kernel.md`.
+vendor's patched 4.9.129 tree and its `.config` (`FINDINGS-vendor-kernel.md`) — and then
+of one driver `#ifdef`, `CONFIG_APPEND_VENDOR_IE_ENABLE`, which makes `struct mlme_priv`
+1312 bytes larger and shifts everything after it in `_ADAPTER`
+(`FINDINGS-driver-config.md`). With both fixed, **not one `ldst` immediate differs
+anywhere in the module**. What remains is the 46 OEM functions, four functions whose only
+difference is a `__LINE__` constant, and two single-function oddities.
 
 ## Recovered vendor build settings
 
@@ -116,6 +124,14 @@ Derived from the binary, applied to the Makefile in the build commit:
 | `CONFIG_RTW_IPCAM_APPLICATION = y` | force-enables monitor; binary has `rtw_recv_monitor` |
 | `CONFIG_WIRELESS_EXT` in kernel | binary has the `rtw_wx_*` handlers |
 | USB-only, ARMv7 | no `platform_*_sdio.o`; ARM attrs |
+| `CONFIG_APPEND_VENDOR_IE_ENABLE = y` | `sizeof(struct mlme_priv) == 4168`; `rtw_vendor_ie_*` symbols |
+| `CONFIG_POWER_SAVING = n` | 40 LPS/IPS functions absent; every `CONFIG_LPS`/`CONFIG_IPS`-guarded string absent |
+| `CONFIG_TXPWR_LIMIT_EN = y` | `rtw_tx_pwr_lmt_enable` is in `.data` with value 1 |
+| `CONFIG_AUTO_NOTCH_FILTER` defined | `phy_SpurCalibration_8188F` is 220 bytes shorter |
+| `CONFIG_PLATFORM_OPS` **not** defined | binary has `platform_wifi_power_on`/`_off` |
+| `REALTEK_CONFIG_PATH = "/dav/"` | `rtw_phy_file_path` resolves to that string |
 
-Enabled per the object list: MESH, 80211K, WNM, MBO, IOCTL_CFG80211, CFG_VENDOR,
-TDLS, BT_COEXIST, MCC, BEAMFORMING, PROC_DEBUG, BR_EXT, ANDROID, AP, P2P, radiotap.
+On per the symbol table: 80211K, WNM, MBO, 80211R, BTM_ROAM, IOCTL_CFG80211, LAYER2_ROAMING,
+IEEE80211W, 80211D, PROC_DEBUG, BR_EXT, NAPI, GRO, NETIF_SG, AP + NATIVEAP_MLME, P2P, WFD,
+radiotap/monitor. Off: MESH, MULTI_AP, CONCURRENT, MCC, TDLS, BT_COEXIST, BEAMFORMING,
+80211AC_VHT, WAPI, MP. Derivation and evidence in `FINDINGS-driver-config.md`.
