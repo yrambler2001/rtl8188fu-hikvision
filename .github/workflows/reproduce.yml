@@ -1,0 +1,174 @@
+# Rebuild the shipped 8188fu.ko from this tree and assert its SHA-256.
+#
+# This repository's whole claim is one hash. This workflow is that claim,
+# executed: it exports a clean `git archive` of the commit under test, builds it
+# with the reconstructed toolchain against the vendor kernel at the vendor's own
+# absolute path, and fails unless the result is
+#
+#     a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13
+#
+# It builds twice and requires the two outputs to be byte-identical, so a
+# passing run also says the build is deterministic.
+#
+# It redistributes none of the vendor's material. The shipped module is never
+# fetched or stored; a hash is not a binary. Everything this job downloads is
+# public: the FSF's GCC 6.5.0 release, kernel.org's crosstool prebuilt,
+# Debian packages from a pinned snapshot, and OpenIPC/linux at one commit.
+#
+# HOST ARCHITECTURE, AND WHY THAT IS THE INTERESTING PART.
+# Local development for this project is arm64; these runners are x86_64. GCC
+# 6.5.0 is built from source in both cases and is a *cross* compiler either way,
+# so the host architecture should not reach target code generation - the host
+# only decides which machine runs cc1, not what cc1 emits. That is the standard
+# argument and it is almost certainly right. It is also exactly the kind of
+# assumption this project exists to check rather than repeat, so the check is
+# the hash below and nothing weaker.
+#
+# If this job ever fails on x86_64 with a mismatch that does not reproduce on
+# arm64, that is not a CI problem to paper over by pinning the runner. It is a
+# finding about GCC 6.5.0 - a host-dependent code-generation path - and it is
+# worth investigating before anything here is changed.
+
+name: reproduce
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reproduce-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reproduce:
+    name: rebuild and assert the SHA-256
+    runs-on: ubuntu-latest
+    # Debian bullseye, the same base as build/Dockerfile, so that CI and the
+    # local build image are the same host environment down to the package
+    # versions (build/setup-toolchain.sh pins them to a Debian snapshot).
+    container: debian:bullseye
+    timeout-minutes: 300
+
+    env:
+      # Pinned host packages; see build/setup-toolchain.sh.
+      APT_SNAPSHOT: 20260801T000000Z
+      # OpenIPC/linux commit whose message is the Fullhan BSP patch's filename.
+      VENDOR_COMMIT: 6bde37dba95d28db55a9962df97b5887ab1dbeaa
+      # Fetch and configure the kernel in one place: in CI the tree is a
+      # throwaway, so prepare-vendor-kernel.sh configures it in situ instead of
+      # copying 700 MB to keep a pristine original.
+      VENDOR_SRC: /build/linux-vendor
+      KSRC: /build/linux-vendor
+      # verify.sh: run the build here rather than via `docker exec`.
+      EXEC: direct
+      EXPECT_SHA256: a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13
+
+    steps:
+      # actions/checkout needs git inside the container; without it it falls
+      # back to a source tarball with no .git, and `git archive HEAD` - which
+      # is what makes this a test of the committed tree rather than of the
+      # workspace - would have nothing to export.
+      #
+      # The sources.list lines here duplicate build/setup-toolchain.sh, which
+      # cannot be used yet because it is in the repository we are about to
+      # check out. That script is the authority; keep the two in step.
+      - name: Bootstrap git for checkout
+        run: |
+          set -e
+          codename=$(. /etc/os-release; echo "$VERSION_CODENAME")
+          cat > /etc/apt/sources.list <<SRCLIST
+          deb http://snapshot.debian.org/archive/debian/$APT_SNAPSHOT $codename main
+          deb http://snapshot.debian.org/archive/debian/$APT_SNAPSHOT $codename-updates main
+          deb http://snapshot.debian.org/archive/debian-security/$APT_SNAPSHOT $codename-security main
+          SRCLIST
+          rm -f /etc/apt/sources.list.d/*.list 2>/dev/null || true
+          printf 'Acquire::Check-Valid-Until "false";\nAcquire::Retries "5";\n' \
+            > /etc/apt/apt.conf.d/99no-check-valid
+          apt-get -o Acquire::Check-Valid-Until=false update
+          apt-get install -y --no-install-recommends git ca-certificates curl xz-utils
+
+      - uses: actions/checkout@v4
+
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # ------------------------------------------------------------------
+      # Toolchain. Both caches are keyed on the script that produces them, so
+      # editing that script invalidates exactly the cache it invalidates.
+      # ------------------------------------------------------------------
+      - name: Cache crosstool prebuilt (binutils 2.32 + control compiler)
+        uses: actions/cache@v4
+        with:
+          path: /opt/gcc-6.5.0-nolibc
+          key: crosstool-6.5.0-${{ runner.arch }}-${{ hashFiles('build/setup-toolchain.sh') }}
+
+      - name: Prerequisites and crosstool
+        run: sh build/setup-toolchain.sh
+
+      - name: Cache GCC 6.5.0 built with the vendor --with-pkgversion
+        id: cache-gcc
+        uses: actions/cache@v4
+        with:
+          path: /opt/gcc-6.5.0-vendor
+          key: gcc-vendor-6.5.0-${{ runner.arch }}-${{ hashFiles('build/build-gcc-vendor.sh') }}
+
+      # The expensive step, ~25-40 min cold. It is what puts
+      # "GCC: (arm_multilib_uclibc_20200924) 6.5.0" in .comment, 159 times.
+      - name: Build GCC 6.5.0 with the vendor pkgversion
+        if: steps.cache-gcc.outputs.cache-hit != 'true'
+        run: sh build/build-gcc-vendor.sh
+
+      # ------------------------------------------------------------------
+      # Vendor kernel: fetch one commit, retarget CPU_V6 -> CPU_V7, configure
+      # with fh8856v200_defconfig, modules_prepare.
+      # ------------------------------------------------------------------
+      - name: Cache prepared vendor kernel
+        id: cache-kernel
+        uses: actions/cache@v4
+        with:
+          path: /build/linux-vendor
+          key: >-
+            vendor-kernel-${{ env.VENDOR_COMMIT }}-${{ runner.arch }}-${{
+            hashFiles('build/fetch-vendor-kernel.sh', 'build/prepare-vendor-kernel.sh') }}
+
+      - name: Fetch the vendor kernel
+        if: steps.cache-kernel.outputs.cache-hit != 'true'
+        run: sh build/fetch-vendor-kernel.sh
+
+      - name: Configure the vendor kernel
+        if: steps.cache-kernel.outputs.cache-hit != 'true'
+        run: sh build/prepare-vendor-kernel.sh
+
+      # ------------------------------------------------------------------
+      # The assertion.
+      # ------------------------------------------------------------------
+      - name: Record the environment
+        run: |
+          echo "host          $(uname -m)  $(. /etc/os-release; echo "$PRETTY_NAME")"
+          echo "host gcc      $(gcc --version | head -1)"
+          echo "cross gcc     $(/opt/gcc-6.5.0-vendor/arm-linux-gnueabi/bin/arm-linux-gnueabi-gcc --version | head -1)"
+          echo "kernel        $(cat /build/linux-vendor/include/generated/utsrelease.h)"
+
+      # verify.sh exports HEAD with `git archive`, builds it twice, requires the
+      # two builds to be identical, and asserts $EXPECT_SHA256. It is the same
+      # script used locally; only EXEC=direct differs, which makes it run the
+      # build here instead of through `docker exec`.
+      - name: Rebuild twice and assert the SHA-256
+        run: sh build/verify.sh
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Reproduction"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| host | \`$(uname -m)\` |"
+            echo "| expected SHA-256 | \`$EXPECT_SHA256\` |"
+            echo "| result | ${{ job.status }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

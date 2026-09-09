@@ -39,5 +39,6 @@ ENV VENDOR_SRC=/vendor-src
 ENV KSRC=/build/linux-vendor
 
 COPY prepare-vendor-kernel.sh /build/prepare-vendor-kernel.sh
+COPY fetch-vendor-kernel.sh   /build/fetch-vendor-kernel.sh
 
 WORKDIR /src

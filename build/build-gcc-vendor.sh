@@ -29,9 +29,11 @@
 #     --disable-libatomic --disable-libcc1 --disable-libmpx \
 #     --enable-checking=release
 #
-# (Arnd builds a Canadian cross: build=x86_64, host=aarch64.  We are already on
-# aarch64, so this is a plain native build of the same cross compiler.  See
-# FINDINGS-toolchain.md for why that cannot change target code generation.)
+# (Arnd builds a Canadian cross: build=x86_64, host=aarch64.  This script does
+# a plain native build of the same cross compiler on whatever host it is run
+# on - arm64 locally, x86_64 in CI.  See FINDINGS-toolchain.md for why that
+# cannot change target code generation, and the CI workflow for the assertion
+# that checks it rather than trusting it.)
 #
 # BINUTILS IS NOT REBUILT.  1,293 same-size functions already assemble
 # instruction-identically with the stock binutils 2.32 that ships in the same
@@ -54,11 +56,34 @@ WORK=${WORK:-/build/gcc-vendor}
 JOBS=${JOBS:-$(nproc)}
 INFRA=https://gcc.gnu.org/pub/gcc/infrastructure
 
+# Host triple and host compiler.  build == host, so this is a plain native
+# build of a cross compiler and only --target reaches code generation; these
+# strings land in the "Configured with:" banner and nowhere else.  They are
+# pinned per architecture rather than taken from config.guess so that the
+# aarch64 values are exactly the ones this project has always used, and so that
+# an unrecognised host is an error rather than a silent change.
+#
+# CI runs this on x86_64 while local development is arm64.  That the two
+# produce the same ARM object code is not assumed here: it is asserted, by the
+# SHA-256 check in .github/workflows/reproduce.yml.
+case "$(uname -m)" in
+    aarch64|arm64) NATIVE_TRIPLE=aarch64-unknown-linux-gnu; NATIVE_PFX=aarch64-linux-gnu ;;
+    x86_64|amd64)  NATIVE_TRIPLE=x86_64-pc-linux-gnu;       NATIVE_PFX=x86_64-linux-gnu  ;;
+    *) echo "!! unrecognised host $(uname -m); set HOST_TRIPLE, HOST_CC and HOST_CXX" >&2
+       exit 1 ;;
+esac
+HOST_TRIPLE=${HOST_TRIPLE:-$NATIVE_TRIPLE}
+HOST_CC=${HOST_CC:-$NATIVE_PFX-gcc}
+HOST_CXX=${HOST_CXX:-$NATIVE_PFX-g++}
+command -v "$HOST_CC"  >/dev/null 2>&1 || HOST_CC=gcc
+command -v "$HOST_CXX" >/dev/null 2>&1 || HOST_CXX=g++
+
 [ -x "$STOCK/bin/$TARGET-as" ] || { echo "!! no stock binutils at $STOCK" >&2; exit 1; }
 
 echo "=== target      $TARGET"
 echo "=== pkgversion  $PKGVERSION"
 echo "=== prefix      $PREFIX"
+echo "=== host        $HOST_TRIPLE  ($HOST_CC / $HOST_CXX)"
 echo "=== binutils    $($STOCK/bin/$TARGET-as --version | head -1)"
 
 mkdir -p "$WORK"
@@ -123,11 +148,10 @@ for t in addr2line ar as c++filt elfedit gprof ld ld.bfd nm objcopy objdump \
 done
 
 # ------------------------------------------------------------- configure ----
-# --build and --host are given as the canonical four-field triple config.guess
-# reports here, rather than Arnd's three-field --host=aarch64-linux-gnu, which
-# describes his Canadian cross (build=x86_64).  Since build == host this is a
-# plain native build either way; the strings only reach the "Configured with:"
-# banner.  (The three-field form also happens to be rejected by GMP's wrapped
+# --build and --host are the canonical four-field triple for this host, rather
+# than Arnd's three-field --host=aarch64-linux-gnu, which describes his Canadian
+# cross (build=x86_64).  Since build == host this is a plain native build either
+# way; the strings only reach the "Configured with:" banner.  (The three-field form also happens to be rejected by GMP's wrapped
 # config.sub in old GMP releases - 4.3.2 says "machine `aarch64' not
 # recognized" - though gmp-6.1.0, which this script fetches, accepts it.)
 mkdir -p build
@@ -136,8 +160,8 @@ if [ ! -f config.status ]; then
     echo "== configure"
     PATH="$PREFIX/bin:$PATH" \
     "../gcc-$GCC_VER/configure" \
-        --build=aarch64-unknown-linux-gnu \
-        --host=aarch64-unknown-linux-gnu \
+        --build="$HOST_TRIPLE" \
+        --host="$HOST_TRIPLE" \
         --target=$TARGET \
         --enable-targets=all \
         --prefix="$PREFIX" \
@@ -157,7 +181,7 @@ if [ ! -f config.status ]; then
         --disable-libmpx \
         --enable-checking=release \
         --with-pkgversion="$PKGVERSION" \
-        CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ \
+        CC="$HOST_CC" CXX="$HOST_CXX" \
         CFLAGS="-O2 -fcommon" CXXFLAGS="-O2 -fcommon"
 fi
 

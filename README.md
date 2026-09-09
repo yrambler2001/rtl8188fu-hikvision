@@ -1,8 +1,15 @@
 # rtl8188fu-repro
 
+[![reproduce](https://github.com/yrambler2001/rtl8188fu-hikvision/actions/workflows/reproduce.yml/badge.svg)](https://github.com/yrambler2001/rtl8188fu-hikvision/actions/workflows/reproduce.yml)
+
 A byte-level reproduction of the `8188fu.ko` shipped in a Hikvision/EZVIZ IP
 camera firmware (`root_b240427`), together with the reconstructed source of the
 two OEM translation units that are in no public Realtek release.
+
+The badge above is the whole claim, checked on every push: CI rebuilds the
+module from this tree and fails unless its SHA-256 is the one below. It
+redistributes none of the vendor's material — a hash is not the binary. See
+§8 for licensing and for what "reconstructed" means here.
 
 **Current state: byte-exact. All 1,918,056 bytes match.**
 
@@ -314,19 +321,27 @@ over `j`, and the guard temp over `buf`.
 | | |
 |---|---|
 | the shipped module | `8188fu.ko`, 1,918,056 bytes, SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13` |
-| the vendor kernel tree | stock Linux 4.9.129 + `0000-fh8852-kernel-4.9.129.vendor.patch` (Fullhan FH8852/FH8856 BSP), 752 MB |
-| Docker | any host; the images are `linux/arm64` (they run x86_64 too, the compiler prebuilt is the arm64-hosted one) |
+| the vendor kernel tree | stock Linux 4.9.129 + `0000-fh8852-kernel-4.9.129.vendor.patch` (Fullhan FH8852/FH8856 BSP), 752 MB. Public: `OpenIPC/linux` at `6bde37dba95d`, which `build/fetch-vendor-kernel.sh` pulls as a single commit |
+| Docker | any host. `build/setup-toolchain.sh` picks the arm64- or x86_64-hosted crosstool prebuilt from `uname -m`, so the image builds native on either |
 | ~3 GB of scratch and ~15 minutes | for the GCC rebuild, which is a one-off |
 
 ### 5.2 Build
 
+If you do not already have the vendor kernel tree, fetch it first — one
+commit, no history:
+
+```sh
+VENDOR_SRC=/path/to/linux-4.9.129-fullhan-pristine sh build/fetch-vendor-kernel.sh
+```
+
 ```sh
 # 1. base image: Debian bullseye + kernel.org crosstool GCC 6.5.0 arm-linux-gnueabi
-docker build --platform linux/arm64 -t rtl8188fu-build build/
+#    (build/setup-toolchain.sh; the same script CI runs, so the two environments
+#     cannot drift, and both pin their Debian packages to a snapshot)
+docker build -t rtl8188fu-build build/
 
 # 2. vendor-kernel image
-docker build --platform linux/arm64 -f build/Dockerfile.vendor \
-             -t rtl8188fu-build-vendor build/
+docker build -f build/Dockerfile.vendor -t rtl8188fu-build-vendor build/
 
 # 3. container, with the driver tree and the vendor kernel tree mounted
 docker run -d --name fuv --platform linux/arm64 \
@@ -436,8 +451,9 @@ that is what hid barrier 6 (§3.6).
 
 ## 6. Verification
 
-`build/verify.sh` exports HEAD with `git archive`, builds it **twice** in the
-container, and scores the result:
+`build/verify.sh` exports HEAD with `git archive`, builds it **twice**, asserts
+the SHA-256, and — if you point it at a copy of the shipped module — scores and
+`cmp`s the result as well:
 
 ```
 $ sh build/verify.sh /path/to/8188fu.ko
@@ -454,12 +470,21 @@ $ sh build/verify.sh /path/to/8188fu.ko
    RAW         0 bytes differ positionally (0.00%)
    link layout inside otherwise-matching symbols: 0 bytes of relocation addends, 0 bytes of B/BL displacements
    byte-identical sections: 41/41
-== hashes
-a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  /path/to/8188fu.ko
-a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  cleanchk/8188fu.ko
+== sha256
+   rebuilt  a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13
+   expected a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13
+   MATCH
+== shipped sha256
+   a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  /path/to/8188fu.ko
 == cmp
    IDENTICAL
 ```
+
+The path argument is optional (`$SHIPPED` does the same); without it the hash
+assertion still runs, and it is the same proof. `EXEC=direct` runs the build in
+the current environment instead of through `docker exec`, which is what CI does
+— `.github/workflows/reproduce.yml` runs this very script, so what the badge
+checks and what you can check locally are one recipe, not two.
 
 So: a clean `git archive` of HEAD reproduces the shipped module bit for bit;
 two consecutive builds of that checkout are byte-identical to each other, so
@@ -507,11 +532,16 @@ core/ hal/ os_dep/ include/ platform/   Realtek v5.15.3 + the reconstruction
   include/ez_wifi.h                     OEM types and objects (pulled in by drv_types.h)
   include/ez_wifi_fn.h                  OEM prototypes (only where they are called)
 Makefile                                the recovered vendor configuration
+.github/workflows/reproduce.yml         CI: rebuild and assert the SHA-256
+LICENSE                                 GPL v2 (see section 8)
 build/
   Dockerfile, Dockerfile.vendor         the two build images
+  setup-toolchain.sh                    prerequisites + crosstool; shared with CI
+  fetch-vendor-kernel.sh                OpenIPC/linux @ 6bde37dba95d, one commit
   prepare-vendor-kernel.sh              vendor kernel tree -> modules_prepare
   build-gcc-vendor.sh                   GCC 6.5.0 with --with-pkgversion
   build-vendorpath.sh                   the real build
+  verify.sh                             clean export -> build twice -> assert
   fulldiff.py offsetdiff.py bytecompare.py    scoreboards
   oem/                                  the per-function iteration harness
   oem/gen.py oem/lab.py oem/specs/      the variant search
@@ -528,3 +558,67 @@ FINDINGS-oem-catalogue.md               barriers 5 and 6 - the OEM code, in full
                                          that covers it)
 PLAN.md                                 work packages and status
 ```
+
+---
+
+## 8. Licensing, provenance, and what "reconstructed" means
+
+### 8.1 Licence
+
+This tree is Realtek's `rtl8188fu` Linux driver, which Realtek releases under
+**GPL v2** — every source file carries the notice, and `os_dep/linux/os_intfs.c`
+declares `MODULE_LICENSE("GPL")`. The full licence text is in [`LICENSE`](LICENSE).
+
+**NOTICE.** Upstream origin: the vendor tarball
+`rtl8188FU_linux_v5.15.3-6-g1a2e952f9.20230217`, plus the three earlier Realtek
+drops listed in §2. This repository is a **modified GPLv2 work**. What it adds
+on top of that upstream is:
+
+* the recovered build configuration, written into the `Makefile` (§3.3);
+* the two reconstructed OEM translation units and their headers, behind
+  `CONFIG_EZ_WIFI` (§8.2), and the four call sites in Realtek's own files that
+  they patch;
+* the build, comparison and documentation tooling — `build/`, `.github/` and
+  the `*.md` files — which is original to this repository and is offered under
+  the same licence.
+
+What this repository does **not** contain, and never has — checked over the
+whole history, not just the tip: the shipped `8188fu.ko`, any decompiler
+output, any firmware image, and the vendor kernel tree. Reproducing the module
+needs the first and the last of those; §5.1 says where each comes from.
+
+The vendor build path
+`/data1/jiangqifeng6/work/tongyibianyi/develop_branch/wifi/rtl8188FU_linux_v5.15.3-6-g1a2e952f9.20230217/`
+and the `Dec 25 2023 20:43:27` timestamps appear throughout this tree and in the
+build scripts. They are not editorial. `__FILE__`, `__DATE__` and `__TIME__`
+bake them into the shipped binary's `.rodata`, so reproducing it byte for byte
+requires reproducing them exactly; the path is an opaque string here and nothing
+more.
+
+### 8.2 The two OEM files: provenance
+
+`os_dep/linux/ez_sc.c` and `os_dep/linux/ez_wifi_config.c` are **reconstructions
+produced by decompiling the shipped module.** They are not the vendor's original
+text, and they cannot be: nothing in a compiled binary determines the spelling of
+the source that produced it.
+
+What is true of them is narrower, and checkable:
+
+* they compile — with the toolchain, flags and build path recorded here — to
+  **byte-identical object code**: all 46 functions, at the shipped addresses,
+  with the shipped sizes;
+* the driver they are part of is GPLv2, so the vendor's derivative work is
+  itself covered by the GPL;
+* they exist to demonstrate and verify reproducibility. Without these two
+  translation units the module cannot be rebuilt at all, so the hash assertion
+  that the whole repository rests on could not be checked by anyone.
+
+§3.7 separates, in three graded classes, what the binary actually states
+(the function set, sizes and addresses, the data objects, all 115 strings, the
+call graph, the source order, the block layout, and an instruction sequence that
+matches word for word) from what it merely constrains (local and parameter
+names, comments, whitespace, any spelling the compiler normalises away) and from
+the handful of deliberate devices chosen because they reproduce a compiler
+decision rather than because a vendor would plausibly have written them. Each of
+those devices is commented in the source. `FINDINGS-oem-catalogue.md` gives the
+derivation function by function.

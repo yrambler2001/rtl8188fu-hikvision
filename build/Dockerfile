@@ -12,21 +12,17 @@ FROM debian:bullseye
 
 ARG KVER=4.9.129
 
-# bullseye is EOL: its Release files are past Valid-Until. Accept them.
-RUN printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-check-valid \
- && apt-get -o Acquire::Check-Valid-Until=false update \
- && apt-get install -y --no-install-recommends \
-        build-essential bc bison flex libssl-dev libelf-dev kmod \
-        xz-utils curl ca-certificates make patch file \
-    && rm -rf /var/lib/apt/lists/*
-
-# Exact compiler match: the shipped module was built with GCC 6.5.0.
-# kernel.org's crosstool prebuilts provide GCC 6.5.0 / arm-linux-gnueabi (soft-float,
-# matching the original's missing Tag_ABI_VFP_args) with an arm64 host binary,
-# so it runs natively here. "nolibc" is correct - kernel modules are freestanding.
-WORKDIR /opt
-RUN curl -fsSL "https://mirrors.edge.kernel.org/pub/tools/crosstool/files/bin/arm64/6.5.0/arm64-gcc-6.5.0-nolibc-arm-linux-gnueabi.tar.xz" \
-      | tar -xJ && ls /opt
+# Prerequisites, and the exact compiler family: the shipped module was built
+# with GCC 6.5.0. kernel.org's crosstool prebuilts provide GCC 6.5.0 /
+# arm-linux-gnueabi (soft-float, matching the original's missing
+# Tag_ABI_VFP_args); "nolibc" is correct, kernel modules are freestanding.
+#
+# This is one script rather than inline RUN steps because CI runs the identical
+# script on the runner (.github/workflows/reproduce.yml), so the image and the
+# CI environment cannot drift. It picks the arm64- or the x86_64-hosted
+# prebuilt from `uname -m`, which is why this image builds on either host.
+COPY setup-toolchain.sh /tmp/setup-toolchain.sh
+RUN sh /tmp/setup-toolchain.sh && rm -f /tmp/setup-toolchain.sh
 #
 # That prebuilt is stock GCC, so its .comment reads "GCC: (GNU) 6.5.0" while the
 # shipped module reads "GCC: (arm_multilib_uclibc_20200924) 6.5.0" - GCC's

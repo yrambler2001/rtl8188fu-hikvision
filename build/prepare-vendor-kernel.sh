@@ -5,10 +5,19 @@
 # We only need headers + Module.symvers machinery, not a bootable kernel.
 set -e
 
+# VENDOR_SRC is the pristine tree; KSRC is where it is configured.  They differ
+# by default because kbuild writes .config, autoconf.h, include/generated/* and
+# host binaries all over the source directory, and the bind-mounted host tree
+# has to stay pristine.  Set KSRC equal to VENDOR_SRC - or VENDOR_COPY=0 - to
+# configure in place, which is what CI does: there the tree is a throwaway that
+# build/fetch-vendor-kernel.sh has just unpacked.
 VENDOR_SRC="${VENDOR_SRC:-/vendor-src}"
 KSRC="${KSRC:-/build/linux-vendor}"
+VENDOR_COPY="${VENDOR_COPY:-1}"
 DEFCONFIG="${VENDOR_DEFCONFIG:-fh8856v200_defconfig}"
 : "${HOSTCFLAGS:=-Wall -O2 -fomit-frame-pointer -std=gnu89 -fcommon}"
+
+if [ "$KSRC" = "$VENDOR_SRC" ]; then VENDOR_COPY=0; fi
 
 # GCC 10+ host tools: 4.9's scripts/ assume -fcommon and gnu89. Keep HOSTCFLAGS
 # a single quoted word so `make` sees one argument.
@@ -16,15 +25,20 @@ kmake() {
     make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- HOSTCFLAGS="$HOSTCFLAGS" "$@"
 }
 
-if [ ! -d "$VENDOR_SRC/arch/arm/mach-fh" ]; then
-    echo "!! $VENDOR_SRC does not look like the Fullhan tree (no arch/arm/mach-fh)" >&2
-    exit 1
-fi
-
-if [ ! -d "$KSRC" ]; then
+if [ "$VENDOR_COPY" = 1 ] && [ ! -d "$KSRC" ]; then
+    if [ ! -d "$VENDOR_SRC/arch/arm/mach-fh" ]; then
+        echo "!! $VENDOR_SRC does not look like the Fullhan tree (no arch/arm/mach-fh)" >&2
+        exit 1
+    fi
     echo "== copying $VENDOR_SRC -> $KSRC (752 MB, takes a minute)"
     mkdir -p "$KSRC"
     tar -C "$VENDOR_SRC" --exclude=.git -cf - . | tar -C "$KSRC" -xf -
+fi
+
+# Whichever tree we are about to configure, it has to be the right one.
+if [ ! -d "$KSRC/arch/arm/mach-fh" ]; then
+    echo "!! $KSRC does not look like the Fullhan tree (no arch/arm/mach-fh)" >&2
+    exit 1
 fi
 
 cd "$KSRC"
