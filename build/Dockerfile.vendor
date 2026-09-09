@@ -21,6 +21,10 @@
 #   docker exec fuv sh /src/build/build-vendor.sh
 FROM rtl8188fu-build:latest
 
+# python3 for build/oem/ (the OEM reconstruction harness: oemdiff.py, annot.py).
+RUN apt-get update && apt-get install -y --no-install-recommends python3-minimal \
+ && rm -rf /var/lib/apt/lists/*
+
 # GCC 10+ on the host side defaults to -fno-common, which breaks 4.9's host tools
 # (scripts/dtc, scripts/kconfig). -std=gnu89 -fcommon restores 4.9's assumptions.
 ENV HOSTCFLAGS="-Wall -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
