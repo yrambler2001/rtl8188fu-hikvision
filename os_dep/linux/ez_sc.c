@@ -209,6 +209,21 @@ int ez_new_sc_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 		return -1;
 	}
 
+	/*
+	 * Reconstruction device, not vendor text - FINDINGS-oem-catalogue.md
+	 * section 21.  IRA colours allocnos in ALLOCNO_FREQ order, and at -Os
+	 * ALLOCNO_FREQ is exactly 1000 x the number of RTL references; `rq` has
+	 * three (the parameter copy, the null test, the address add) and
+	 * `is_null` two, so `rq` is coloured first and its weight-125 shuffle
+	 * preference moves it to r2.  The shipped code leaves `rq` in r1 and
+	 * puts `is_null` in r3, which needs `is_null` to out-count it.  These
+	 * two empty asms are two more references and emit no instructions; no
+	 * ordinary-C spelling that adds a reference survives VRP, whose range
+	 * for the value is [0,1].
+	 */
+	__asm__ __volatile__("" :: "r"(is_null));
+	__asm__ __volatile__("" :: "r"(is_null));
+
 	return ez_set_new_sc(dev, is_null, &wrq->u.data);
 }
 
