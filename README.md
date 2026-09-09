@@ -47,45 +47,56 @@ build/compare.sh /path/to/original/8188fu.ko
 
 ## Result
 
-Byte-exact is **not reachable** — see below. What the build does achieve:
+Byte-exact for the whole module is not reachable (see below), but with the
+**exact compiler** the majority of the driver now reproduces bit-for-bit.
 
 | metric | result |
 |---|---|
 | `vermagic` | **exact match** — `4.9.129 mod_unload ARMv7 p2v8` |
 | ARM ELF attributes | **identical** (all 15 tags) |
-| `__param` section | **byte-identical** (2460 bytes) |
 | compiled source files | **157 / 159** (missing only the two OEM files) |
-| function symbols | **3790 / 3939 = 96.2%** |
-| module size | 1,944,320 vs 1,918,056 (+1.37%) |
+| function symbols present | **3817 / 3939 = 96.9%** |
+| same-size functions | **3038 / 3817 = 79.6%** |
+| **byte-identical functions** | **2181 = 55.4% of the module, 37.0% of `.text`** |
 
-The 149 functions present only in the original break down as:
+"Byte-identical" masks two things that encode link layout rather than code:
+relocated operands, and ARM `B`/`BL` displacements the assembler resolved
+inside `.text`. Run `build/bytecompare.py <original.ko>` to reproduce.
 
-- **63** GCC inlining artifacts (`.constprop.N` / `.part.N` / `.isra.N`)
-- **~54** OEM Hikvision/EZVIZ code (`ez_*`, `rtw_ezviz_ie_set`, `rtw_vendor_ie_*`,
-  `set_smartconfig_flag`, `woal_is_*_country`, …)
-- **27** static helpers GCC 10 inlined but GCC 6.5 kept out of line
-  (`IS_MCAST`, `__div64_32`, `copy_from_user`, `tasklet_schedule`, …)
-- **8** unexplained (`__nat25_*`, `platform_wifi_power_on/off`,
-  `hal_EfusePgPacketWrite2ByteHeader`, `rtw_cfg80211_set_auth_type`, `dump_rx_packet`)
+### What matching the compiler bought
 
-## Why byte-exact is impossible
+| | Debian GCC 10.2.1 | **GCC 6.5.0 (exact)** |
+|---|---|---|
+| function symbol coverage | 96.2% | **96.9%** |
+| unmatched inlining artifacts | 63 | **39** |
+| byte-identical functions | ~0 | **2181 (55.4%)** |
 
-1. **Two source files do not exist publicly.** `ez_sc.c` and `ez_wifi_config.c`
-   are OEM SmartConfig code — ~30 functions, plus vendor-IE patches spliced into
-   stock Realtek files. They exist only in the decompilation.
-2. **The compiler is not obtainable.** `arm_multilib_uclibc_20200924` GCC 6.5.0
-   is a vendor-built toolchain; it was never published. GCC codegen is not
-   portable across versions, so `.text` will differ regardless.
-3. **The kernel tree is not the vanilla one.** vermagic says 4.9.129, but the
-   vendor's tree is patched and its `.config` is unknown; struct layouts in
-   `include/generated/autoconf.h` feed directly into codegen.
-4. **The build path is embedded.** `WARN_ON` strings bake in
-   `/data1/jiangqifeng6/...`, so even identical code yields different `.rodata`
-   unless the path is recreated exactly.
+The toolchain came from kernel.org's crosstool prebuilts:
+`arm64-gcc-6.5.0-nolibc-arm-linux-gnueabi`. Two things make this legitimate
+rather than an approximation:
 
-Items 2–4 are reproducible in principle with the vendor's SDK. Item 1 is not
-recoverable from anything public — it would have to come from a GPL source
-request to the device vendor.
+* `arm_multilib_uclibc_20200924` is only GCC's `--with-pkgversion=` string. It
+  lands in `.comment` and affects nothing else. The compiler underneath is
+  stock GCC 6.5.0.
+* `nolibc` is correct. Kernel modules are freestanding — they never link libc,
+  so the uclibc/glibc distinction cannot reach codegen.
+
+### What still differs, and why
+
+Of the 857 functions that are the right size but not bit-identical, the
+differing instruction words classify as:
+
+| share | kind |
+|---:|---|
+| 36.6% | `ldr`/`str` where **only the immediate offset differs** |
+| 35.0% | same opcode, different operand |
+| 18.7% | different opcode |
+| 9.7% | `ldr`/`str`, other field |
+
+A load/store that differs *only* in its immediate offset is a struct field at a
+different offset. That is the signature of **different kernel headers** — the
+vendor's patched 4.9.129 tree and its `.config`. Fixing the compiler moved the
+bottleneck from barrier 2 to barrier 3.
 
 ## Recovered vendor build settings
 
