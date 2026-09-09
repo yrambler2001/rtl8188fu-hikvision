@@ -46,7 +46,8 @@ ENV KSRC=/build/linux
 # shipped module contains the rtw_wx_* WEXT handlers, so the vendor kernel had it.
 RUN cd /build/linux \
  && perl -0pi -e 's/^config WIRELESS_EXT\n\tbool\n/config WIRELESS_EXT\n\tbool\n\tdefault y\n/m' net/wireless/Kconfig \
- && grep -A2 '^config WIRELESS_EXT' net/wireless/Kconfig
+ && perl -0pi -e 's/^config WEXT_PRIV\n\tbool\n/config WEXT_PRIV\n\tbool\n\tdefault y\n/m' net/wireless/Kconfig \
+ && grep -A2 -E '^config (WIRELESS_EXT|WEXT_PRIV)' net/wireless/Kconfig
 
 RUN cd /build/linux \
  && make ARCH=arm CROSS_COMPILE=$CROSS_COMPILE HOSTCFLAGS="$HOSTCFLAGS" multi_v7_defconfig \

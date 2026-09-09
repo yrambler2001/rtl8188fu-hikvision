@@ -23,3 +23,22 @@ CONFIG_WEXT_PROC=y
 CONFIG_WEXT_PRIV=y
 CONFIG_WEXT_SPY=y
 CONFIG_CFG80211_WEXT=y
+
+# --- reconstructed from the shipped binary ---
+# __this_module in the shipped .ko is 384 bytes; the stock config here gives 512.
+# Disabling these brings sizeof(struct module) to exactly 384.
+# CONFIG_KALLSYMS is not set
+# CONFIG_JUMP_LABEL is not set
+# CONFIG_UNUSED_SYMBOLS is not set
+# CONFIG_CONSTRUCTORS is not set
+# CONFIG_FTRACE is not set
+# CONFIG_PERF_EVENTS is not set
+# CONFIG_TRACING is not set
+# CONFIG_DEBUG_SET_MODULE_RONX is not set
+# CONFIG_MODULES_TREE_LOOKUP is not set
+# netdev_priv offset in the shipped .ko is 992 (vs 1152 here): the vendor's
+# struct net_device is ~160 bytes smaller. Disabling PM_SLEEP recovers 32 of it
+# by shrinking the embedded struct device / dev_pm_info.
+# CONFIG_SUSPEND is not set
+# CONFIG_HIBERNATION is not set
+# CONFIG_PM_SLEEP is not set
