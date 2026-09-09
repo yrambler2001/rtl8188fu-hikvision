@@ -439,7 +439,7 @@ char *ez_strsep(char **stringp, char delim, char esc)
 	}
 }
 
-int ez_mac2u8(u8 *mac, const char *s, char *end)
+void ez_mac2u8(u8 *mac, const char *s, char *end)
 {
 	char *sep;
 	char *buf;
@@ -447,11 +447,11 @@ int ez_mac2u8(u8 *mac, const char *s, char *end)
 	int i = 0;
 
 	if (!s)
-		return 0;
+		return;
 
 	buf = kmalloc(strlen(s) + 1, GFP_KERNEL);
 	if (!buf)
-		return 0;
+		return;
 
 	memcpy(buf, s, strlen(s));
 	p = buf;
@@ -464,8 +464,6 @@ int ez_mac2u8(u8 *mac, const char *s, char *end)
 	} while (i != 6);
 
 	kfree(buf);
-
-	return 0;
 }
 
 int ez_get_mac_addr(void)
@@ -663,17 +661,19 @@ int ez_wifi_func_poll_ioctl_handle(struct net_device *dev, struct ifreq *rq, int
 	printk("\n ####### %s() Enter, cmd = %x\n", __func__, cmd);
 
 	if (dev && rq) {
-		if (!wrq->u.data.pointer) {
-			printk("iwp == NULL or iwp->pointer == null!!!\n");
-			ret = -1;
-			return ret;
-		}
+		if (wrq->u.data.pointer)
+			goto ok;
 	} else {
 		printk("%s():  net or rq == NULL!\n", __func__);
 		ret = -1;
 		return ret;
 	}
 
+	printk("iwp == NULL or iwp->pointer == null!!!\n");
+	ret = -1;
+	return ret;
+
+ok:
 	ez_GetWiFiVersion(version);
 
 	len = wrq->u.data.length;
