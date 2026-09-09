@@ -112,7 +112,7 @@ const u8 invalid_efuse_data2[10] = {
 enum ez_wifi_uid_gap_1 {
 	EZ_WIFI_UID_GAP_1_0, EZ_WIFI_UID_GAP_1_1, EZ_WIFI_UID_GAP_1_2,
 	EZ_WIFI_UID_GAP_1_3, EZ_WIFI_UID_GAP_1_4, EZ_WIFI_UID_GAP_1_5,
-	EZ_WIFI_UID_GAP_1_6, EZ_WIFI_UID_GAP_1_7
+	EZ_WIFI_UID_GAP_1_6
 };
 
 int process_config_vars(char *buf, u32 len, char *pick, const char *var)
@@ -120,7 +120,7 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 	u32 i;
 	unsigned int pos = 0;
 	u32 n = 0;
-	int m = 0;
+	_Bool m = 0;
 	int end = 0;
 	int j = 0;
 
@@ -148,14 +148,12 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 		}
 		else if (buf[i] == '\\') {
 			n = 1;
-			pos = 0;
-			continue;
+			goto zero_pos;
 		}
 		else if (buf[i] == '\n') {
 			end = 0;
 			n = 0;
-			pos = 0;
-			continue;
+			goto zero_pos;
 		}
 		else {
 			size_t vlen = strlen(var);
@@ -166,40 +164,32 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 				j = 0;
 				i += end;
 			} else {
-				int skip;
+				int skip = (end == 0) & (m & 1);
 
-				if (end)
-					skip = 0;
-				else
-					skip = m & 1;
 				if (skip) {
 					end = 0;
 					m = 0;
-					pos = 0;
-					continue;
+					goto zero_pos;
 				}
 				end++;
-				if (!m) {
-					pos = 0;
-					continue;
-				}
+				if (!m)
+					goto zero_pos;
 			}
-			if (buf[i] != '\t') {
-				if (j) {
-					int last = pick[j - 1];
-
-					m = (last == ' ' && buf[i] == ' ');
-					if (m) {
-						pos = 0;
-						continue;
-					}
-				}
-				pick[j++] = buf[i];
-			}
-			m = 1;
-			pos = 0;
-			continue;
 		}
+		if (buf[i] != '\t') {
+			if (j) {
+				int last = pick[j - 1];
+
+				m = (last == ' ' && buf[i] == ' ');
+				if (m)
+					goto zero_pos;
+			}
+			pick[j++] = buf[i];
+		}
+		m = 1;
+zero_pos:
+		__asm__ __volatile__("");
+		pos = 0;
 	}
 
 	return j;
