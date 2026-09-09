@@ -4,9 +4,9 @@ A byte-level reproduction of the `8188fu.ko` shipped in a Hikvision/EZVIZ IP
 camera firmware (`root_b240427`), together with the reconstructed source of the
 two OEM translation units that are in no public Realtek release.
 
-**Current state: 121 of 1,918,056 bytes differ — 0.0063% of the file**
+**Current state: 116 of 1,918,056 bytes differ — 0.0060% of the file**
 (a plain positional `cmp`; the shift-tolerant "structural" count in
-`fulldiff.py` says 203, and §6 explains why the two disagree).
+`fulldiff.py` says 192, and §6 explains why the two disagree).
 
 **39 of the 41 sections are byte-identical**, including `.rodata`,
 `.rodata.str1.1`, `.data`, `.bss`, `.symtab`, `.strtab`, `.modinfo`,
@@ -19,8 +19,8 @@ Only two sections still differ:
 
 | section | bytes | what |
 |---|---:|---|
-| `.text` | 102 | three functions out of 3,909, all the right size, all differing only in which register the allocator picked |
-| `.note.gnu.build-id` | 19 | an SHA-1 over the linked output; converges last, by construction |
+| `.text` | 96 | two functions out of 3,909, both the right size, both differing only in which register the allocator picked |
+| `.note.gnu.build-id` | 20 | an SHA-1 over the linked output; converges last, by construction |
 
 ---
 
@@ -73,7 +73,7 @@ configuration, and the small number of vendor edits to Realtek's own files.
 | 2 | vendor kernel tree + `.config` (Fullhan FH865X, Linux 4.9.129) | **closed** — `FINDINGS-vendor-kernel.md` |
 | 3 | driver `#ifdef` configuration | **closed** — `FINDINGS-driver-config.md` |
 | 4 | build path baked into `.rodata` by `__FILE__`, and `__DATE__`/`__TIME__` | **closed** — `FINDINGS-byte-gap.md` §3 |
-| 5 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) not in any release | **reconstructed** — 42/46 byte-identical, `FINDINGS-oem-catalogue.md` |
+| 5 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) not in any release | **reconstructed** — 44/46 byte-identical, `FINDINGS-oem-catalogue.md` |
 | 6 | `DECL_UID` uniquifiers (`__func__.NNNN`) in `.symtab`/`.strtab` | **closed** — 879/879, `.strtab` byte-identical, `FINDINGS-oem-catalogue.md` §11 |
 
 ### 3.1 The compiler
@@ -225,26 +225,30 @@ recovered vendor code, and are commented as such.
 | `.text` | **exactly 975,780 bytes**, every symbol at the right address and the right size |
 | compiled source files | **159 / 159** |
 | function symbols | **3,909 / 3,909**, none missing, none extra |
-| byte-identical functions in `.text` | **3,906 / 3,909** |
+| byte-identical functions in `.text` | **3,907 / 3,909** |
 | local symbol uniquifiers | **879 / 879** |
 | byte-identical sections | **39 / 41** |
-| **whole file** | **121 of 1,918,056 bytes differ (0.0063%)** |
+| **whole file** | **116 of 1,918,056 bytes differ (0.0060%)** |
 
 ### What still differs
 
 | function | bytes | words | edit distance | cause |
 |---|---:|---:|---:|---|
 | `process_config_vars` | 79 | 44 of 86 | 5 | Two named GCC decisions. `uncprop` rewrites all seven main-path `pos = 0` PHI arguments into the guard temp, and out-of-SSA's coalesce costs accumulate *per edge*, so seven beats pos's own two: the `orr` writes pos's register and pos needs a second one plus a latch copy. And the shipped build materialises `m` with a dead `moveq #1` / `movne #0` pair where ours branches straight to the shared `m = 1`, because VRP proves the flag is 1 on the taken edge. `FINDINGS-oem-catalogue.md` §17 |
-| `ez_new_sc_ioctl` | 17 | 5 of 14 | 2 | One IRA tie, read out of `-fira-verbose=9`: `rq` and `is_null` both prefer r1 at weight 2000 and cancel in the conflict costs, so `rq`'s weight-125 preference for r2 — created because `rq` *dies* in `add r2, rq, #16`, whose destination is the hard argument register — decides. §21 |
-| `ez_strsep` | 6 | 4 of 39 | 2 | TER moves `q + 1` to its single use, so the add lands after the NUL store, and `auto_inc_dec`'s backwards scan folds the pair into `strb r3, [r4], #1`. The pointer is then in `q`'s own register, so the two `*stringp` stores are different instructions and cross-jumping cannot merge them. §18 |
+| `ez_new_sc_ioctl` | 17 | 5 of 14 | 2 | One IRA decision, read out of `-fira-verbose=9` and then out of `ira-color.c`: the colouring order is `bucket_allocno_compare_func`'s, whose first key is `ALLOCNO_FREQ` — and at `-Os` that is exactly 1000 × the number of RTL references. `rq` has three references and `is_null` two, so `rq` is coloured first and takes r2 on a weight-125 preference. Give `is_null` two more references and the order flips and the function is byte-identical; no ordinary-C spelling that adds them has been found. §21 |
 
-Plus 19 bytes of `.note.gnu.build-id`, which is an SHA-1 of the three.
+Plus 20 bytes of `.note.gnu.build-id`, which is an SHA-1 of the two.
 
-All three were searched mechanically, not guessed at: about 70,000
+`ez_strsep` closed during this pass: `tree-ssa-ter.c` was sinking `q + 1` past
+the NUL store, `auto-inc-dec.c` was then folding the pair into a
+post-increment, and the two `*stringp` stores stopped being the same
+instruction so cross-jumping could not merge them. §18.
+
+All three were searched mechanically, not guessed at: about 90,000
 semantically-neutral spellings through `build/oem/gen.py` and
-`build/oem/lab.py`, and the three passes that decide each of them were read out
-of GCC 6.5.0's own source and dumps rather than inferred. §10 and §17–21 say
-what was swept and what was ruled out.
+`build/oem/lab.py`, and the passes that decide each of them were read out of
+GCC 6.5.0's own source and confirmed in its dumps rather than inferred. §10 and
+§17–21 say what was swept and what was ruled out.
 
 ## 5. Reproducing it
 
@@ -367,8 +371,8 @@ that is what hid barrier 6 (§3.6).
 
 ```
 $ python3 build/fulldiff.py /path/to/8188fu.ko ./8188fu.ko --brief
-   STRUCTURAL  203 bytes differ (0.011% of the shipped 1,918,056)
-   RAW         121 bytes differ positionally (0.0063%)
+   STRUCTURAL  192 bytes differ (0.010% of the shipped 1,918,056)
+   RAW         116 bytes differ positionally (0.0060%)
    byte-identical sections: 39/41
 
 $ cmp /path/to/8188fu.ko ./8188fu.ko
@@ -376,12 +380,12 @@ $ cmp /path/to/8188fu.ko ./8188fu.ko
 
 $ sha256sum /path/to/8188fu.ko ./8188fu.ko
 a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  8188fu.ko   (shipped)
-7e9df9b2fb49046db3a175a4dc8d5e334e7576212a9cb45912b5a24fbb243a85  8188fu.ko   (ours)
+b2e014d2554540023997ed39ff32371cc30925d9081528ad6ef04d4dbf2b9809  8188fu.ko   (ours)
 ```
 
 `cmp` is **not** clean, and the numbers above are the honest statement of how
 far this got. The first differing byte is at offset 68, inside the
-`.note.gnu.build-id` SHA-1 — a hash of the three functions in §4, which cannot
+`.note.gnu.build-id` SHA-1 — a hash of the two functions in §4, which cannot
 match until they do. Everything before it, including `e_shoff` and the whole
 section header table, is right.
 

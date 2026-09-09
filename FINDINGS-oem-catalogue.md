@@ -501,12 +501,13 @@ positional byte comparison of the two files:
 | after WP-D | 972 | 0.051% |
 | after the first residual pass | 1,421 | 0.074% |
 | after the `.text` order fix (section 20) | 141 | 0.007% |
-| **now** | **121** | **0.0063%** |
+| after the process_config_vars pass | 121 | 0.0063% |
+| **now** (`ez_strsep` closed, section 18) | **116** | **0.0060%** |
 
 | section | raw bytes differing | what it is |
 |---|---:|---|
-| `.text` | 102 | content in three functions; the section is the right *length*, every symbol is at the right *address* and has the right size |
-| `.note.gnu.build-id` | 19 | an SHA-1 of the module; converges last, by construction |
+| `.text` | 96 | content in two functions; the section is the right *length*, every symbol is at the right *address* and has the right size |
+| `.note.gnu.build-id` | 20 | an SHA-1 of the module; converges last, by construction |
 | everything else | **0** | |
 
 **39 of the 41 sections are byte-identical** - `.rodata`, `.rodata.str1.1`,
@@ -540,27 +541,37 @@ module too.
 | `.text` order of the four probe / EID208 handlers | 873 bytes in `.text`, 208 in `.rodata.str1.1`, 161 in `.rel.text`, 13 in `.ARM.exidx`, 17 in `.symtab` | **0** | `ez_probe_req_handler` belongs *before* `check_probe_sync_eid208` in the source.  Section 20 |
 | `process_config_vars` | 98 bytes, edit distance 12 | 79 bytes, edit distance 5 | the guard is `(pos \| n) \| (pos & n)`, the `n` test's arms write `pos = n`, and `end` is declared before `j`.  Section 17 |
 
-### The three that remain
+### The two that remain
 
-**43 of the 46 OEM functions are byte-identical**, and so are all four public
-functions the OEM patch distorts.  All three that remain are the *right size*
+**44 of the 46 OEM functions are byte-identical**, and so are all four public
+functions the OEM patch distorts.  Both that remain are the *right size*
 and at the right address; what differs is which register the allocator picked.
 
 | function | differs by | what is known |
 |---|---:|---|
-| `process_config_vars` | 79 bytes, 44 words, edit distance 5 | Two mechanisms, both named exactly.  The guard temp is coalesced into pos's partition, because `uncprop` rewrites all seven main-path `pos = 0` PHI arguments into it and out-of-SSA's coalesce costs *accumulate per edge*, so seven beats pos's own two - that costs a `b`, a `mov` and a latch `mov`.  And the shipped build materialises `m` with a dead `moveq #1` / `movne #0` pair where ours branches straight to the shared `m = 1`.  Section 17 |
-| `ez_new_sc_ioctl` | 17 bytes, 5 words, edit distance 2 | One IRA decision, read out of `-fira-verbose=9`: `rq` and `is_null` both prefer r1 at weight 2000 and cancel in `assign_hard_reg`'s conflict costs, so `rq`'s weight-125 preference for r2 - created by `process_reg_shuffles` because `rq` *dies* in `add r2, rq, #16`, whose destination is the hard argument register - decides.  Section 21 |
-| `ez_strsep` | 6 bytes, 4 words, edit distance 2 | TER moves `q + 1` to its single use, so the add lands *after* the NUL store, and `auto_inc_dec`'s reverse scan then folds the pair into `strb r3, [r4], #1`; the pointer is left in `q`'s own register and the two `*stringp` stores are no longer the same instruction, so cross-jumping cannot merge them.  Section 18 |
+| `process_config_vars` | 79 bytes, 44 words, edit distance 5 | Two mechanisms, both named exactly.  The guard temp is coalesced into pos's partition, because `uncprop` rewrites all seven main-path `pos = 0` PHI arguments into it and out-of-SSA's coalesce costs *accumulate per edge*, so seven beats `pos_6`'s two - that costs a `b`, a `mov` and a latch `mov`.  And the shipped build materialises `m` with a dead `moveq #1` / `movne #0` pair where ours branches straight to the shared `m = 1`.  Section 17 |
+| `ez_new_sc_ioctl` | 17 bytes, 5 words, edit distance 2 | One IRA decision, now traced to its input: the colouring order comes from `bucket_allocno_compare_func`, whose first key is `ALLOCNO_FREQ`, which at `-Os` is exactly 1000 x the number of RTL references.  `rq` has three and `is_null` two, so `rq` is coloured first and its weight-125 shuffle preference sends it to r2.  Two more references on `is_null` reverse the order and the function is byte-identical.  Section 21 |
 
 ### Next steps, in the order worth doing them
 
-1. `process_config_vars`: stop `uncprop` rewriting pos's zeros without also
-   letting the guard-true arms merge into the shared `mov r2, #0`.  The two
-   are coupled - section 17 says how.
-2. `ez_strsep` needs `q + 1` to have two uses, or to be in a different block
-   from `*q = 0`, so TER leaves it where the source put it.
-3. `ez_new_sc_ioctl` is two registers and the most stubborn of the three.
-4. `.note.gnu.build-id` will match by itself when the rest does.
+1. `ez_new_sc_ioctl` needs `is_null` to carry more RTL references than `rq`
+   (section 21).  The property is exact and the effect is proven; what is
+   missing is an ordinary-C construct that adds a reference without adding an
+   instruction.  The narrowest remaining hypothesis is the cross-jumped
+   duplicate: an `if`/`else` on an already-live value whose two arms are
+   character-identical and each end in a conditional, so IRA counts both copies
+   and `pass_jump2` - which runs after reload - merges them again.  It needs an
+   *existing* conditional to duplicate, and this function has none that VRP
+   does not delete.
+2. `process_config_vars`: give the guard temp a type that `gimple_can_coalesce_p`
+   refuses against pos's (`((int)(pos | n)) | ((int)(pos & n))` with `pos`
+   unsigned) and the seven PHI arguments stay constants and the whole register
+   cascade comes out right - `orrs r9, r2, r6`, `moveq r2, r6`, `moveq r4, r6`
+   all match exactly.  What then goes wrong is *layout*: the seven `pos = 0`
+   edge copies become real blocks, cross-jumping merges them with the `n`-test
+   arm's own `pos = 0`, and `reorder_basic_blocks_simple` chains the loop tail
+   after the arms instead of after the merged copy.  Section 17.
+3. `.note.gnu.build-id` will match by itself when the rest does.
 
 ---
 
@@ -1077,12 +1088,66 @@ about 8,000 over guard spellings.  Edit distance 21 -> 12 -> 5.
 **The two-instruction group is `m`.**  The shipped build materialises
 `m = (pick[j-1] == ' ' && buf[i] == ' ')` as 0/1 with a conditional-move pair
 and then branches on the same flags; the `movne r7, #0` is dead, because every
-path from it reaches `m = 1`.  Ours branches straight to the shared `m = 1`,
-because VRP asserts `m != 0` on the taken edge, `m`'s range is [0,1], so the
-value is 1 and `phiopt` merges it with the other `1` arguments.  Nothing that
-keeps the semantics gives `m` a range VRP cannot pin: seven spellings of the
-test and the assignment, three types for `m`, and the `switch`/if-chain axis
-all produce the branch.
+path from it reaches `m = 1`.  Ours branches straight to the shared `m = 1`.
+
+The mechanism is exactly the one in section 21's second half.  The C `&&`
+gimplifies to `iftmp = PHI <1, 0>`; `phiopt` turns that into the comparison
+itself, `m = iftmp` is a *copy* so copy-propagation merges the two names, and
+then the branch and the value are the same SSA name: VRP asserts it non-zero
+on the taken edge, its range is [0,1] so the value is 1, and the loop PHI's
+argument on that edge becomes the constant 1 - which `phiopt` then merges with
+the two other `1` arguments, so the whole assignment disappears.  For the
+shipped shape the branch has to test a *different* SSA name from the one the
+PHI carries.  Nothing that keeps the semantics does that: seven spellings of
+the test and the assignment, `&` instead of `&&`, `!!`, `? 1 : 0`, five types
+for `m` itself and five for an intermediate flag copied into it, and writing
+the condition twice so FRE unifies it (which instead splits the fused
+`cmp` / `cmpeq` into two branches and costs four bytes).  Every conversion is
+either `useless_type_conversion_p` or folded away by VRP, because the value's
+range is [0,1].
+
+### What the type fix does and does not do
+
+`uncprop_into_successor_phis` only rewrites a constant PHI argument into an
+SSA name that `gimple_can_coalesce_p` accepts against the *PHI result*, and
+that function requires `TREE_TYPE` pointer equality or an equal
+`TYPE_CANONICAL` plus `types_compatible_p`.  So making the guard's type
+differ from `pos`'s - `((int)(pos | n)) | ((int)(pos & n))` with `pos`
+unsigned - is enough to stop it, and the dumps confirm it exactly:
+
+```
+pos_5 = PHI <pos_6(3), 0(6), 1(8), 0(9), 0(10), 0(13), 0(14), 0(17), 0(18), 0(15), pos_6(5), n_9(7)>
+end_14 = PHI <..., _34(10), _34(13), ...>          <- end still picks the temp up
+m_10  = PHI <..., _34(13), ...>                    <- and so does m
+```
+
+which is what the shipped build does, and the register cascade then comes out
+*exactly* right: `orrs r9, r2, r6`, `moveq r2, r6`, `moveq r4, r6`,
+`movne r6, #0` and the shared `mov r2, #0` all match the shipped word for word.
+
+What breaks instead is **layout**, and the two passes that do it are named:
+
+* out-of-SSA now has to emit a real `pos = 0` copy on each of the seven
+  main-path edges.  `eliminate_phi` issues constant copies last and *from a
+  stack*, so their order within an edge block is the reverse of the PHI order,
+  which is the declaration order - that is why declaring `n` before `pos`
+  swaps `mov r6, #0` and `mov r2, #0` inside the `n`-test arm.
+* `pass_jump2`'s cross-jumping then merges those seven one-instruction blocks
+  with each other *and* with the `n != 0` arm's own `pos = 0`, and
+  `reorder_basic_blocks_simple` - which at `-Os` chains greedily in block
+  order with no sort (section 12) - gives the loop tail to the earliest
+  single-successor predecessor, which is now the arm block rather than the
+  merged copy.  The tail moves from the end of the function to just after the
+  guard, and 44 words differ instead of 44, but in different places: the edit
+  distance goes 5 -> 8 with `n` declared first, 5 -> 10 with `pos` first.
+
+Swept, all compiled and scored against the shipped bytes: 2,592 structural
+shapes; 16,807 type combinations over six locals; 5,184 more crossing the
+types with three guards; 4,320 over all 720 declaration orders; 11,520 over
+declaration order crossed with the arms, the `#` arm and the `\n` arm; about
+8,000 over guard spellings; and 20,160 more in this pass crossing the four
+guard spellings with all 720 declaration orders and the arms.  Edit distance
+21 -> 12 -> 5, and 5 is where it still is.
 
 ---
 

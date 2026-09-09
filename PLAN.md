@@ -8,7 +8,7 @@ SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
 
 * `build/fulldiff.py <shipped> <rebuilt> [--brief]` — whole-file scoreboard:
   every section, the symbol table, the relocations and the string tables.
-  Current: **121 bytes still differ positionally (0.0063% of the file)**, 203
+  Current: **116 bytes still differ positionally (0.0060% of the file)**, 192
   by the shift-tolerant "structural" count; 39 of the 41 sections are
   byte-identical.  *Compare attempts by the raw number:* the structural count
   charges a function whose size is wrong only its size delta and never looks
@@ -46,7 +46,7 @@ SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
 | 2 | vendor kernel tree + `.config` (Fullhan FH865X, Linux 4.9.129) | **solved** — `FINDINGS-vendor-kernel.md` |
 | 3 | driver `#ifdef` configuration | **solved** — `FINDINGS-driver-config.md` |
 | 4 | build path in `.rodata` via `__FILE__`, and `__DATE__`/`__TIME__` | **solved** — `FINDINGS-byte-gap.md` §3 |
-| 5 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) | **reconstructed** — 43/46 byte-identical, all 46 at the shipped address and size; `FINDINGS-oem-catalogue.md` |
+| 5 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) | **reconstructed** — 44/46 byte-identical, all 46 at the shipped address and size; `FINDINGS-oem-catalogue.md` |
 | 6 | `DECL_UID` uniquifiers in `.symtab`/`.strtab` | **solved** — 879/879, `.strtab` byte-identical; `FINDINGS-oem-catalogue.md` §11 |
 
 ## Work packages
@@ -56,7 +56,7 @@ SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
   `fh8856v200_defconfig`, retargeted `CPU_V6` → `CPU_V7`
 - **WP-C** driver `#ifdef` configuration *(done — `FINDINGS-driver-config.md`)*
 - **WP-D** reconstruct `ez_sc.c` / `ez_wifi_config.c` *(done —
-  `FINDINGS-oem-catalogue.md`)*: 28,368 → 121 bytes, 43/46 functions
+  `FINDINGS-oem-catalogue.md`)*: 28,368 → 116 bytes, 44/46 functions
   byte-identical, all 46 at the shipped address and size
 - **WP-E** build under the original path *(done — `FINDINGS-byte-gap.md` §3)*
 - **WP-F** GCC 6.5.0 with `--with-pkgversion='arm_multilib_uclibc_20200924'`
@@ -77,16 +77,18 @@ SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
 
 ## Residuals
 
-**121 bytes**, in three functions and the build-id that hashes them. All three
-are the *right size* and at the *right address*; each is one named GCC decision
-(`FINDINGS-oem-catalogue.md` §17, §18, §21):
+**116 bytes**, in two functions and the build-id that hashes them. Both are
+the *right size* and at the *right address*; each is one named GCC decision
+(`FINDINGS-oem-catalogue.md` §17, §21):
 
 | | bytes | words | edit distance | cause |
 |---|---:|---:|---:|---|
-| `process_config_vars` | 79 | 44 of 86 | 5 | `uncprop` rewrites all seven main-path `pos = 0` PHI arguments into the guard temp and out-of-SSA's coalesce costs accumulate per edge, so the temp is coalesced into pos's partition and pos needs a second register plus a latch copy; and the shipped build materialises `m` with a dead cmov pair where VRP lets ours branch straight to the shared `m = 1` |
-| `ez_new_sc_ioctl` | 17 | 5 of 14 | 2 | an IRA tie: `rq` and `is_null` both prefer r1 at weight 2000 and cancel, and `rq`'s weight-125 preference for r2 — because it dies in `add r2, rq, #16` — decides |
-| `ez_strsep` | 6 | 4 of 39 | 2 | TER moves `q + 1` to its single use, `auto_inc_dec` then folds it into `strb r3, [r4], #1`, and the two `*stringp` stores stop being the same instruction |
-| `.note.gnu.build-id` | 19 | | | an SHA-1 over the linked output |
+| `process_config_vars` | 79 | 44 of 86 | 5 | `uncprop` rewrites all seven main-path `pos = 0` PHI arguments into the guard temp and out-of-SSA's coalesce costs accumulate per edge, so the temp is coalesced into pos's partition and pos needs a second register plus a latch copy; and the shipped build materialises `m` with a dead cmov pair where VRP lets ours branch straight to the shared `m = 1`. Giving the guard a type `gimple_can_coalesce_p` refuses fixes the first exactly — the whole register cascade then matches — but moves the loop tail, because the seven edge copies become blocks that cross-jumping merges with the guard-true arm's own |
+| `ez_new_sc_ioctl` | 17 | 5 of 14 | 2 | an IRA colouring-order decision: `bucket_allocno_compare_func`'s first key is `ALLOCNO_FREQ`, which at `-Os` is 1000 × the number of RTL references. `rq` has three, `is_null` two, so `rq` is coloured first and takes r2 on its weight-125 shuffle preference. Two more references on `is_null` reverse it and the function is byte-identical |
+| `.note.gnu.build-id` | 20 | | | an SHA-1 over the linked output |
+
+`ez_strsep` closed during this pass (§18): TER was sinking `q + 1` past the
+NUL store and `auto-inc-dec` was folding the pair into a post-increment.
 
 Everything else is byte-identical: `.rodata`, `.rodata.str1.1`, `.data`,
 `.bss`, `.symtab`, `.strtab`, `.modinfo`, `.comment`, all twelve relocation
@@ -148,6 +150,26 @@ symbol, is the check that finds that (`FINDINGS-oem-catalogue.md` §20).
 10. **Read IRA's own numbers.** `-fira-verbose=9` prints every allocno, its
     conflicts and its hard-register preferences with weights, which turns
     "guess a shape" into "read the decision". §21
+11. **IRA's colouring order is the reference count.** `assign_hard_reg` runs
+    in the order `push_allocnos_to_stack` unwinds, which is
+    `bucket_allocno_compare_func`'s sort, whose first key is `ALLOCNO_FREQ` —
+    and `REG_FREQ_FROM_BB` is the constant `REG_FREQ_MAX` whenever
+    `optimize_function_for_size_p`, so at `-Os` `ALLOCNO_FREQ` is exactly
+    1000 × the number of times the pseudo appears in the RTL. The allocno with
+    *fewer* references is coloured *last*. A corollary: block frequencies do
+    not exist at `-Os`, so `unlikely()` cannot move an allocation tie at all.
+    §21
+12. **`uncprop` is bounded by `gimple_can_coalesce_p`.** It rewrites a
+    constant PHI argument into an equivalent SSA name only if that name can
+    coalesce with the PHI *result*, which needs `TREE_TYPE` pointer equality or
+    an equal `TYPE_CANONICAL` plus `types_compatible_p`. That is the lever for
+    a coalescing residual — and it is also why it has side effects, because the
+    constant copies it stops suppressing become real blocks that cross-jumping
+    and `reorder_basic_blocks_simple` then move. §17
+13. **`auto-inc-dec` has a `dbg_cnt`.** `-fdbg-cnt=auto_inc_dec:N` blocks one
+    fold and leaves the others, which is how TER and `auto_inc_dec` were
+    separated in `ez_strsep` instead of being argued about. Register
+    allocation has no such counter — `grep dbg_cnt ira-*.c` is empty. §18
 
 Each work package is done by one agent, which writes a markdown report into the
 repo and commits it, so this file plus those reports are the full record.
