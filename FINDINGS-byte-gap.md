@@ -1,5 +1,19 @@
 # The whole-file byte gap
 
+> **Status: closed.** The rebuilt module is byte-identical to the shipped one -
+> `cmp` is silent, both files are
+> `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`, and all 41
+> sections match. This note is the record of the pass that first measured the
+> whole file and closed barrier 4 (the vendor's build path); the numbers in it
+> are that pass's, not the current state. `README.md` §4 and
+> `FINDINGS-oem-catalogue.md` §10 have the final accounting.
+>
+> Two predictions in section 5 came true as written: `.note.gnu.build-id` matched
+> by itself once everything else did, and the `derived` `.strtab` bucket did *not*
+> go to zero when WP-D landed - which is exactly the signal it was put there to
+> give, and is what led to barrier 6 (`FINDINGS-oem-catalogue.md` §11).
+
+
 Everything measured so far (`build/bytecompare.py`, `build/offsetdiff.py`) scored `.text`
 functions. That is the right instrument for "did we recover the vendor's compiler, kernel
 headers and `#ifdef` set", and it is the wrong instrument for "how far is this from a
