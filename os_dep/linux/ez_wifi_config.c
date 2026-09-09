@@ -587,7 +587,6 @@ int ez_wifi_preinit(void)
 		ret = -1;
 	}
 
-version:
 	ez_wifi_version_info();
 	ez_get_mac_addr();
 	if (!ret)
