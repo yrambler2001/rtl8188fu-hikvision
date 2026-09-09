@@ -76,6 +76,27 @@ int check_probe_sync_EID(u8 *buf, int len)
 	return 0;
 }
 
+int ez_probe_req_handler(u8 *pframe, int len)
+{
+	u8 *buf = pframe + 24;
+	int probe_len = len - 24;
+	int offset;
+
+	printk("\n  ez_probe_req_handler probe_len=%d! \n", probe_len);
+
+	offset = check_probe_sync_EID(buf, probe_len);
+	if (offset > 0) {
+		u8 ie_len = buf[offset + 1];
+
+		ez_new_sc.len = ie_len;
+		memcpy(ez_new_sc.buf, &buf[offset + 2], ie_len);
+		ez_new_sc.done = 1;
+		printk("\r\n!!!!!!!!!!GET AP DTAT  SUCCESS!!!!!!!!!!!!!!!!!!\r\n");
+	}
+
+	return 0;
+}
+
 int set_scan_flag(int flag)
 {
 	scan_flag = flag ? 1 : 0;
@@ -101,11 +122,9 @@ int set_scan_flag(int flag)
  * enumerator, a typedef costs one, and nothing is emitted.  Delete one and
  * every `__func__.NNNN' after it in this file stops matching.
  * ------------------------------------------------------------------------ */
-/* check_probe_sync_EID -> rtw_ezviz_ie_set: 10 declarations */
+/* check_probe_sync_EID -> rtw_ezviz_ie_set: 2 declarations */
 enum ez_sc_uid_gap_1 {
-	EZ_SC_UID_GAP_1_0, EZ_SC_UID_GAP_1_1, EZ_SC_UID_GAP_1_2,
-	EZ_SC_UID_GAP_1_3, EZ_SC_UID_GAP_1_4, EZ_SC_UID_GAP_1_5,
-	EZ_SC_UID_GAP_1_6, EZ_SC_UID_GAP_1_7, EZ_SC_UID_GAP_1_8
+	EZ_SC_UID_GAP_1_0
 };
 
 void hexdump(u8 *buf, int len)
@@ -437,28 +456,7 @@ int ez_probe_requst_eid208_handler(u8 *pframe, int len)
 	return offset;
 }
 
-int ez_probe_req_handler(u8 *pframe, int len)
-{
-	u8 *buf = pframe + 24;
-	int probe_len = len - 24;
-	int offset;
-
-	printk("\n  ez_probe_req_handler probe_len=%d! \n", probe_len);
-
-	offset = check_probe_sync_EID(buf, probe_len);
-	if (offset > 0) {
-		u8 ie_len = buf[offset + 1];
-
-		ez_new_sc.len = ie_len;
-		memcpy(ez_new_sc.buf, &buf[offset + 2], ie_len);
-		ez_new_sc.done = 1;
-		printk("\r\n!!!!!!!!!!GET AP DTAT  SUCCESS!!!!!!!!!!!!!!!!!!\r\n");
-	}
-
-	return 0;
-}
-
-/* ez_probe_requst_eid208_handler -> ez_scan_device_ioctl_handle: 27 declarations */
+/* ez_probe_requst_eid208_handler -> ez_scan_device_ioctl_handle: 35 declarations */
 enum ez_sc_uid_gap_7 {
 	EZ_SC_UID_GAP_7_0, EZ_SC_UID_GAP_7_1, EZ_SC_UID_GAP_7_2,
 	EZ_SC_UID_GAP_7_3, EZ_SC_UID_GAP_7_4, EZ_SC_UID_GAP_7_5,
@@ -468,7 +466,10 @@ enum ez_sc_uid_gap_7 {
 	EZ_SC_UID_GAP_7_15, EZ_SC_UID_GAP_7_16, EZ_SC_UID_GAP_7_17,
 	EZ_SC_UID_GAP_7_18, EZ_SC_UID_GAP_7_19, EZ_SC_UID_GAP_7_20,
 	EZ_SC_UID_GAP_7_21, EZ_SC_UID_GAP_7_22, EZ_SC_UID_GAP_7_23,
-	EZ_SC_UID_GAP_7_24, EZ_SC_UID_GAP_7_25
+	EZ_SC_UID_GAP_7_24, EZ_SC_UID_GAP_7_25, EZ_SC_UID_GAP_7_26,
+	EZ_SC_UID_GAP_7_27, EZ_SC_UID_GAP_7_28, EZ_SC_UID_GAP_7_29,
+	EZ_SC_UID_GAP_7_30, EZ_SC_UID_GAP_7_31, EZ_SC_UID_GAP_7_32,
+	EZ_SC_UID_GAP_7_33
 };
 
 int ez_scan_device_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cmd)
