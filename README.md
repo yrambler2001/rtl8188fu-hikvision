@@ -4,14 +4,15 @@ A byte-level reproduction of the `8188fu.ko` shipped in a Hikvision/EZVIZ IP
 camera firmware (`root_b240427`), together with the reconstructed source of the
 two OEM translation units that are in no public Realtek release.
 
-**Current state: 348 of 1,918,056 bytes differ — 0.018% of the file.**
+**Current state: 56 of 1,918,056 bytes differ — 0.003% of the file.**
 **35 of the 41 sections are byte-identical**, `.strtab` among them: all 879
-`__func__.NNNN` uniquifiers now match, so the symbol table's order is exact
-with the suffixes and not only without them. Four of the 3,909 functions in
-`.text` differ — by two ARM instructions, by one, by one, and by two registers.
-The other 3,905 differ at most in relocated operands and `B`/`BL`
-displacements — link layout, caused by those four moving things — and none of
-the four differs for any semantic reason.
+`__func__.NNNN` uniquifiers match, so the symbol table's order is exact with
+the suffixes and not only without them. **Every relocation in the module
+matches** — all 31,299 in `.rel.text` and all 7,671 elsewhere. Three of the
+3,909 functions in `.text` differ: one by an instruction, one by an
+instruction, one by two registers. The other 3,906 are byte-identical, and
+none of the three differs for any semantic reason — they are register
+allocation and one CSE tie.
 
 ---
 
@@ -205,36 +206,38 @@ recovered vendor code, and are commented as such.
 | `.ARM.exidx` and all 3 other exidx sections | **byte-identical** (3,909 unwind entries) |
 | `.strtab` | **byte-identical** (124,098 bytes) |
 | `.symtab` symbol order | **identical**, including the `.NNNN` uniquifiers |
-| relocation sections | **11 of 12 byte-identical**; `.rel.text` differs only inside the four functions below |
+| relocation sections | **all 12 match entry for entry** (38,970 relocations) |
 | compiled source files | **159 / 159** |
 | function symbols | **3,909 / 3,909**, none missing, none extra |
-| byte-identical functions in `.text` | **3,905 / 3,909** |
+| byte-identical functions in `.text` | **3,906 / 3,909** |
 | local symbol uniquifiers | **879 / 879** |
 | byte-identical sections | **35 / 41** |
-| **whole file** | **348 of 1,918,056 bytes differ (0.018%)** |
+| **whole file** | **56 of 1,918,056 bytes differ (0.003%)**; raw positional 3,043 (0.16%) |
 
 ### What still differs
 
-Where the 348 bytes are:
+Where the 56 bytes are:
 
 | section | bytes | what |
 |---|---:|---|
-| `.rel.text` | 280 | 17 shipped / 18 ours unmatched relocation entries — almost all of them one displaced literal pool |
-| `.text` | 36 | 16 bytes of size delta across three functions, 20 bytes of content in a fourth |
+| `.text` | 28 | 8 bytes of size delta across two functions, 20 bytes of content in a third |
 | `.note.gnu.build-id` | 20 | an SHA-1 of the linked output; converges last, by construction |
-| `.symtab` | 12 | three `st_size` fields |
+| `.symtab` | 8 | two `st_size` fields |
 
-Four functions, all in the reconstructed OEM code, and every one of them a
-register-allocation or CSE decision rather than anything semantic:
+Three functions, all in the reconstructed OEM code, and every one of them a
+register-allocation tie rather than anything semantic:
 
 | function | delta | cause |
 |---|---:|---|
-| `ez_scan_device_ioctl_handle` | +4, and ~192 of the `.rel.text` bytes | one literal-pool word. The shipped build derives `&probe_req_t` from the `.bss` section anchor with `add r5, r4, #612` (612 is an encodable ARM immediate) and then `&probe_req_t.value` with `add r0, r5, #10`. Ours folds `anchor + 622` — not encodable — into a single pool constant at `cse_local`, and that word displaces every pool entry after it. `FINDINGS-oem-catalogue.md` §16 |
-| `process_config_vars` | +8 (2 insns) | a `mov r5,r1` / `mov r1,r5` pair on the loop back edge. The shipped build keeps `n` in a callee-saved register across the two calls, so IRA has twelve call-crossing allocnos, spills three, and `pos` fits in one register. Ours rematerialises `n = 0` because VRP asserts it from the loop guard. §17 |
-| `ez_strsep` | +4, 3 insns | one copy on the loop back edge: an out-of-SSA tie between coalescing the loop PHI with `q` or with `p + 1`. §18 |
+| `process_config_vars` | -4 (1 insn) | the shipped build spills `pick` to the stack and keeps `n` in a callee-saved register across `strlen`/`memcmp` — twelve call-crossing allocnos and three spills; ours has eleven and two, because VRP's `register_edge_assert_for` asserts `n == 0` from the loop guard and `n` is rematerialised. Everything from the `strlen` call through the comparison matches instruction for instruction. `FINDINGS-oem-catalogue.md` §17 |
+| `ez_strsep` | +4 (1 insn) | one copy on the loop back edge: an out-of-SSA tie between coalescing the loop PHI with `q` or with `p + 1`. §18 |
 | `ez_new_sc_ioctl` | 20 bytes, right size | an IRA preference tie: `rq` and `is_null` both prefer `r1` at weight 2000 and cancel, and `rq`'s uncontested weight-125 preference for `r2` — from the `add r2, rq, #16` that sets up the third argument — decides |
 
-All four were searched mechanically, not guessed at: about 27,000
+The two size deltas cancel, so `.text` is the right length; that is why the raw
+positional difference is 3,043 bytes rather than hundreds of thousands. Fixing
+either one alone would break that.
+
+All three were searched mechanically, not guessed at: about 35,000
 semantically-neutral spellings through `build/oem/gen.py` and
 `build/oem/lab.py`. §10 says what was swept for each.
 
@@ -359,22 +362,24 @@ that is what hid barrier 6 (§3.6).
 
 ```
 $ python3 build/fulldiff.py /path/to/8188fu.ko ./8188fu.ko --brief
-   STRUCTURAL  348 bytes differ (0.018% of the shipped 1,918,056)
+   STRUCTURAL  56 bytes differ (0.003% of the shipped 1,918,056)
+   RAW         3,043 bytes differ positionally (0.16%)
    byte-identical sections: 35/41
 
 $ cmp /path/to/8188fu.ko ./8188fu.ko
-/path/to/8188fu.ko ./8188fu.ko differ: char 33, line 1
+/path/to/8188fu.ko ./8188fu.ko differ: char 69, line 1
 
 $ sha256sum /path/to/8188fu.ko ./8188fu.ko
 a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  8188fu.ko   (shipped)
-cd34ad3edbc6b0fc756d76c50f095747883caa3bc70cedb630feb60543db7597  8188fu.ko   (ours)
+d71aad53a1aaa2246dc0565cdb8c8bf71e6e1f5ad0d3835774a2fdacbad50192  8188fu.ko   (ours)
 ```
 
 `cmp` is **not** clean, and the numbers above are the honest statement of how
-far this got.  The first differing byte is at file offset 32 - `e_shoff` in the
-ELF header - because `.text` is 16 bytes longer, which moves the section header
-table; it is a consequence of the four functions in §4, not an independent
-problem.  See §4 for exactly what is left.
+far this got.  The first differing byte has moved from offset 32 to offset 68:
+`.text` is now the right length, so `e_shoff` and the whole section header
+table are right, and the first difference is inside the `.note.gnu.build-id`
+SHA-1 — which is a hash of the three functions below and cannot match until
+they do.  See §4 for exactly what is left.
 
 ## 7. Repository layout
 

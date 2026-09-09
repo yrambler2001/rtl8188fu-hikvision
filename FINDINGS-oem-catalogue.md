@@ -5,15 +5,16 @@ This note is the catalogue WP-D was asked for: what the two missing translation
 units are, what is in them, how each fact was read out of the binary, and where
 the reconstruction stands.
 
-**Result so far:** the whole-file gap went **28,368 -> 348 bytes** (1.479% ->
-**0.018%** of 1,918,056). **35 of the 41 sections are byte-identical** -
+**Result so far:** the whole-file gap went **28,368 -> 56 bytes** (1.479% ->
+**0.003%** of 1,918,056). **35 of the 41 sections are byte-identical** -
 `.rodata.str1.1`, `.rodata`, `.data`, `.bss`, `.comment`, `.modinfo`,
 `.ARM.exidx`, the ARM attributes, **`.strtab`** and eleven of the twelve
-relocation sections - and `.symtab` has the right size, the right entry count,
-no missing or extra symbol and the right symbol *order*, uniquifiers included.
-**42 of the 46 OEM functions are byte-identical**, and so are all four public
+relocation sections - every relocation in the module now matches - and
+`.symtab` has the right size, the right entry count, no missing or extra
+symbol and the right symbol *order*, uniquifiers included.
+**43 of the 46 OEM functions are byte-identical**, and so are all four public
 functions the OEM patch distorts, plus `rtw_efuse_analyze` (section 14).
-Sections 10 to 18 are the current state; sections 1 to 9 are the original WP-D
+Sections 10 to 19 are the current state; sections 1 to 9 are the original WP-D
 catalogue.
 
 ---
@@ -479,59 +480,72 @@ names. `annot.py` resolves literal-pool addends so the shipped code is readable.
 | before WP-D | 28,368 | 1.479% |
 | after WP-D | 972 | 0.051% |
 | after the first residual pass | 455 | 0.024% |
-| **now** | **348** | **0.018%** |
+| **now** | **56** | **0.003%** |
 
 | section | structural | what it is |
 |---|---:|---|
-| `.rel.text` | 280 | 17 shipped / 18 ours unmatched relocation entries - almost all of them one displaced literal pool, see below |
-| `.text` | 36 | 16 bytes of size delta across three functions, 20 bytes of content in a fourth |
+| `.text` | 28 | 8 bytes of size delta across two functions, 20 bytes of content in a third |
 | `.note.gnu.build-id` | 20 | an SHA-1 of the module; converges last, by construction |
-| `.symtab` | 12 | three `st_size` fields |
+| `.symtab` | 8 | two `st_size` fields |
 
 **35 of the 41 sections are byte-identical**, including `.strtab` - all 879
 `__func__.NNNN` uniquifiers now match, so `.symtab`'s symbol order is exact
-with the suffixes rather than only without them (section 11).  Raw positional
-difference is 347,821 bytes; that number is dominated by the 16-byte `.text`
-shift moving everything after the OEM objects, not by content.
+with the suffixes rather than only without them (section 11).  **Every one of
+the 31,299 `.rel.text` relocations matches**, and so does every other
+relocation in the module.  The two size deltas are -4 and +4, so `.text` comes
+out the right length: the raw positional difference is **3,043 bytes**, 0.16%
+of the file, against 433,444 at the start of this pass.
 
 ### Closed during this pass
 
 | | was | now | how |
 |---|---|---|---|
-| `ez_strsep` | 156 bytes, 26 words | 160 bytes, 17 words, **3 instructions** | the escape test is two `if`s with a duplicated `memmove`; section 18 |
+| `ez_scan_device_ioctl_handle` | +4 bytes, one extra pool word, ~192 bytes of `.rel.text` | **byte-identical** | there is no `goto trig_scan`: the shared tail is written out in both TRIG arms and cross-jumping merges it.  Sections 16 and 19 |
+| `process_config_vars` | +8 bytes, edit distance 21 | -4 bytes, edit distance 12 | an if-chain rather than a `switch`, `pos = 0` per path, and `pos` a different tree type from `n`.  Sections 15, 17, 19 |
+| `ez_strsep` | 156 bytes, 26 words | 160 bytes, 17 words, **3 instructions** | the escape test is two `if`s with a duplicated `memmove`; sections 18 and 19 |
 | OEM source order | `ez_probe_req_handler` mid-file | just before `ez_scan_device_ioctl_handle` | the only interval the DECL_UID oracle scored *negative*; the move also cut `.symtab`'s raw difference from 7,482 to 3,312 bytes |
 | `ez_read_rssi_per_ant_ioctl` | had `precvpriv` | uses `padapter->recvpriv.rssi` | one declaration too many for the oracle, and byte-neutral either way |
 | the 16 uniquifiers | 863/879 | **879/879**, `.strtab` byte-identical | section 11 |
+| all relocations | 312 bytes of `.rel.text` | **0** | a consequence of the first two |
 
 Everything was searched mechanically rather than by hand: `build/oem/gen.py`
 expands a spec's orthogonal axes into whole translation units and
 `build/oem/lab.py` compiles and scores them ten at a time, about thirty a
-second.  Roughly 27,000 variants went through it in this pass.  Two scores
+second.  Roughly 35,000 variants went through it in this pass.  Two scores
 matter and they disagree often: `d`, the size delta, and `s`, the Levenshtein
 distance of the instruction sequences with the register fields blanked out.
 `s` is the one that says whether a shape is right, because a wholesale
 register renaming makes almost every word differ while changing nothing
 structural.
 
-### The four that remain
+### The three that remain
+
+**43 of the 46 OEM functions are byte-identical** (`build/oem/run.sh`), and so
+are all four public functions the OEM patch distorts.
 
 | function | delta | what is known |
 |---|---:|---|
-| `ez_scan_device_ioctl_handle` | +4, and ~192 of the `.rel.text` bytes | One literal-pool word: `.LANCHOR0+622`, the address of `probe_req_t.value`.  It sits in the middle of the pool, so every entry after it moves by four and those relocations are most of `.rel.text`.  Section 16. |
-| `process_config_vars` | +8 | Two instructions, a `mov r5,r1` / `mov r1,r5` pair on the loop back edge.  IRA has eleven call-crossing allocnos where the shipped build has twelve, spills two instead of three, keeps `pick` in a register instead of the stack, and splits `pos` across two.  The twelfth is `n`: the shipped build never writes it in the switch's default case, ours rematerialises `n = 0` there because VRP proved it.  Section 17. |
+| `process_config_vars` | -4, edit distance 12 of 86 | One instruction short, and the register allocation still differs at the entry.  The shipped build spills `pick` to the stack and keeps `n` in a callee-saved register across `strlen`/`memcmp` - twelve call-crossing allocnos and three spills; ours has eleven and two, because VRP asserts `n == 0` from the loop guard and rematerialises it.  Everything from the `strlen` call through the comparison now matches instruction for instruction.  Section 17. |
 | `ez_strsep` | +4, 3 instructions | One copy on the loop back edge: an out-of-SSA coalescing tie between the loop PHI's `q` and its `p + 1`.  Section 18. |
-| `ez_new_sc_ioctl` | 20 content | Right size, same seven instructions, two registers swapped.  An IRA preference tie: `rq` and `is_null` both prefer r1 at weight 2000 and cancel, and `rq`'s uncontested weight-125 preference for r2 - from the `add r2, rq, #16` that sets up the third argument - decides.  Unchanged by 1,569 further shapes and by 23 optimisation flags. |
+| `ez_new_sc_ioctl` | 20 content, right size | Same seven instructions, two registers swapped.  An IRA preference tie: `rq` and `is_null` both prefer r1 at weight 2000 and cancel, and `rq`'s uncontested weight-125 preference for r2 - from the `add r2, rq, #16` that sets up the third argument - decides.  Unchanged by 1,625 shapes and 23 optimisation flags. |
+
+The two size deltas cancel, which is why `.text` is the right length and the
+raw difference is 3,043 bytes rather than hundreds of thousands.  Fixing
+either one alone would break that, so they have to close together or not at
+all.
 
 ### Next steps, in the order worth doing them
 
-1. `ez_scan_device_ioctl_handle` is worth about 200 of the 348 bytes on its
-   own, and the mechanism is now known exactly (section 16): the fold happens
-   in `cse_local`, and what decides it is whether `&probe_req_t` and
-   `&probe_req_t.value` are still one expression by then.
-2. `process_config_vars` needs `n` live across the two calls, which needs VRP
-   not to assert `n == 0` at the switch (section 17).
-3. `ez_strsep` and `ez_new_sc_ioctl` are one instruction and two registers.
-4. `.note.gnu.build-id` will match by itself when the rest does.
+1. `process_config_vars` needs `n` live across the two calls, which needs VRP's
+   `register_edge_assert_for` not to assert `n == 0` from the loop guard
+   (section 17).  A guard of the form `(pos | n) > 0` or `(pos | n) == 1`
+   *does* block the assertion and *does* produce the shipped register
+   allocation - `stm sp, {r2, r3}` at the entry, `pick` on the stack, `buf` in
+   `sl` - but costs one instruction, because GCC then needs `orr` plus
+   `cmp #1` where the shipped code has a single `orrs`.  The remaining
+   question is what spelling gets both.
+2. `ez_strsep` is one copy; `ez_new_sc_ioctl` is two registers.
+3. `.note.gnu.build-id` will match by itself when the rest does.
 
 ---
 
@@ -844,10 +858,12 @@ cross product for exactly this reason.
 
 ---
 
-## 16. `ez_scan_device_ioctl_handle`: one literal-pool word, and where it comes from
+## 16. `ez_scan_device_ioctl_handle`: one literal-pool word - closed
 
-This is the most expensive residual in the file: four bytes of `.text` and
-about 192 of the 280 in `.rel.text`.
+This was the most expensive residual in the file: four bytes of `.text` and
+about 192 of the 280 in `.rel.text`.  Section 19 has the fix; this section is
+the diagnosis that led to it, and it is worth keeping because the mechanism
+recurs.
 
 Both builds put the OEM `.bss` anchor and two addresses derived from it in the
 function's literal pool.  Ours puts a third there, `.LANCHOR0+622` - the
@@ -890,10 +906,9 @@ build they stay one expression, `&probe_req_t` survives into the shared block
 Swept without moving it: 180 shapes over cached struct/byte/value pointers and
 declaration position, 270 more over those crossed with the copy order and the
 `id` spelling, and 105 over the order of the eight field writes.  Every one
-scores `d=+4 s=19` except three that reach the right size by a different route
-and cost 492 bytes elsewhere.  A GCC flag does move it - `-fno-tree-coalesce-vars`
-gives the right size - which confirms the mechanism is out-of-SSA/CSE and not
-anything expressible in the source that has been tried.
+scored `d=+4 s=19`.  What moved it was none of those: it was writing the shared
+tail out in both TRIG arms instead of jumping to it, which puts the two
+`&probe_req_t` in the same basic block.  Section 19.
 
 ---
 
@@ -944,16 +959,27 @@ and the guard *is* an `IOR` by then: the C front end folds `n || pos` into
 same way, and all fold `n`.
 
 Swept: 2,592 structural shapes (guard spelling, both `|=` in the switch, where
-`pos = 0` sits, `for` vs `while`, declaration order), 16,807 type
-combinations over six locals and seven spellings of a 32-bit integer, 3,360
-crossing the two, and 288 where the guard value is given a name of its own and
-assigned explicitly where the shipped code uses `r9`.  Best structural distance
-is 18 instructions out of 86; the right *size* is reachable (`int pos; s32 n;`,
-section 15) but at the cost of more content bytes than it saves.
+`pos = 0` sits, `for` vs `while`, declaration order), 16,807 type combinations
+over six locals and seven spellings of a 32-bit integer, 3,360 crossing the
+two, 288 where the guard value is given a name of its own and assigned
+explicitly where the shipped code uses `r9`, 48 over `switch` versus if-chain,
+1,024 over the if-chain against the type cross product, 4,608 over the guard
+and the two `|=`, 1,728 over the inside of the default arm, and about 400 over
+guard forms chosen to defeat the assertion.  Three of those helped and are in
+the tree: the if-chain, `pos = 0` per path, and `pos` having a different tree
+type from `n`.  Edit distance 21 -> 12 of 86.
 
-The narrowest remaining hypothesis: the vendor's guard is not an `IOR` of the
-two flags at `vrp1` time - either because the two are not both plain locals, or
-because one of them is not the same SSA name the switch reads.
+**The assertion can be defeated.**  `register_edge_assert_for` recurses into an
+`IOR`'s operands only when the comparison is `== 0` (or `!= 1` on a
+one-bit type).  Writing the guard as `(pos | n) > 0` or `(pos | n) == 1` -
+both equivalent here, since the two flags only ever hold 0 or 1 - leaves
+`n` un-asserted, and the register allocation then *is* the shipped one:
+`stm sp, {r2, r3}` at the entry, `pick` on the stack, `buf` in `sl`, twelve
+call-crossing allocnos.  It costs one instruction, because GCC then emits
+`orr` plus `cmp #1` where the shipped code has a single `orrs`, and the extra
+content it brings costs more than the eight bytes it saves (164 whole-file
+bytes against 56).  So the narrowest remaining question is precise: what
+spelling blocks the assertion *and* still compares against zero.
 
 ---
 
@@ -997,3 +1023,53 @@ difference here because the cast is a useless conversion and `q` disappears
 anyway); 486 over which of the two pointers each use is written in terms of;
 and 16 genuinely different loop carriers - carry `p`, carry `q`, no `q` at all,
 an index, a `while` head.  All of them score exactly 3.
+
+---
+
+## 19. A shared tail is duplicated source
+
+This is the rule that closed the last two big residuals, and it is the most
+useful thing this pass found after section 12.
+
+Section 12 established that at `-Os` block layout is source order: GCC 6's
+`reorder_basic_blocks_simple` skips its edge sort entirely when optimising for
+size, so blocks are chained in GIMPLE order.  The corollary took a while to
+notice.  If a block in the shipped code is reached from two places, there are
+two ways the source could have produced it - a `goto` to a common label, or two
+copies that cross-jumping merged - and **they produce the same final layout by
+different routes**.  What differs is the expression graph that reaches the
+register allocator, because each duplicated copy is CSE'd, propagated and
+scheduled in its own basic block before the merge happens.
+
+Both remaining large residuals turned out to be that.
+
+**`ez_scan_device_ioctl_handle`** was written here with `goto trig_scan`: the
+two TRIG cases fill `probe_req_t` and jump to a shared tail.  The vendor wrote
+the tail twice.  With the whole body - the `if (len)` copy, the zero-length
+check, the five printks, the `rtw_ezviz_ie_set` call - duplicated into both
+arms, the function is byte-identical, pool included.  The mechanism:
+`probe_req_t.id` is an unaligned `u16` in a packed struct, so GCC builds
+`&probe_req_t` explicitly to address the two byte stores; the memcpy
+destination builds it again.  With the `goto` the two live in different basic
+blocks, nothing combines them, and `cse_local` folds the second into the single
+constant `.LANCHOR0+622` - which has to go in the literal pool, because 622 is
+not an encodable ARM immediate.  Duplicated, the two are in the same block,
+`&probe_req_t` survives as `add r5, r4, #612`, and `&probe_req_t.value` is
+`add r0, r5, #10`.  That one pool word was displacing eleven relocations:
+`.rel.text` went 280 -> 32 bytes and the whole file 348 -> 96.
+
+**`ez_strsep`** is the same shape one level down: `*p == esc || *p == delim`
+written as two `if`s, each with its own `memmove(q, p, strlen(q)); continue;`.
+Cross-jumping merges them and keeps the earlier copy, which is what puts the
+`*p == delim` test after the memmove block.  Six instruction-level differences
+become three.
+
+**`process_config_vars`** got a third variant of it: `pos = 0` written at the
+end of each path that falls out of the selector rather than once after it.
+That, plus writing the selector as an if-chain instead of a `switch`, plus
+`pos` and `n` having different tree types (section 15), took the edit distance
+from 21 to 12 and the whole file 96 -> 56.
+
+The practical rule for reading shipped code: **a `goto` in a reconstruction is
+a hypothesis, not an observation.**  Try the duplicated form as well - it costs
+one variant.
