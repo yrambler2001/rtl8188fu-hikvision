@@ -30,9 +30,12 @@ SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
 * `build/oem/gen.py --spec build/oem/specs/<f>.py --out build/oem/lab/<run>` —
   expand a spec's orthogonal axes into whole translation units, and
   `build/oem/lab.py --unit <u> --dir <run> --fn <f>` to compile and score them
-  ten at a time. About fifteen variants a second; roughly 70,000 went through
-  it for the three remaining functions. Score by `s`, the register-blanked
-  instruction edit distance, not by `n`.
+  ten at a time. About fifteen variants a second; roughly 90,000 went through
+  it for the last three functions. Score by `s`, the register-blanked
+  instruction edit distance, not by `n`. *Caveat:* a spec axis passed through
+  the environment is split on `|`, so a guard expression containing `|` must
+  be written into the spec, not exported - one 34,560-variant run was wasted
+  that way.
 * `build/oem/align.py <fn> [--obj FILE]` — the two instruction streams aligned
   by that same edit distance and printed side by side, so what is structurally
   different is one glance rather than an inference. Works against an object or
