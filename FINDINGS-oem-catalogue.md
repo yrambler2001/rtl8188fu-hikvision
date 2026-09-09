@@ -1079,6 +1079,34 @@ and the latch copy disappears.  But it *also* re-creates a shared
 into, and the net is worse (edit distance 8 against 5).  The two effects are
 coupled through the same block and that is the open question.
 
+### Every way of making the guard's type differ, and what each costs
+
+`gimple_can_coalesce_p` needs `TREE_TYPE` pointer equality or an equal
+`TYPE_CANONICAL` plus `types_compatible_p`, so any of these blocks `uncprop`
+for `pos` - and every one of them then pays the same layout price:
+
+| guard / declaration | edit distance | size |
+|---|---:|---:|
+| `unsigned int pos`, `u32 n`, `(pos \| n) \| (pos & n)` (shipped-matching baseline) | **5** | +0 |
+| `unsigned long pos`, `u32 n` | 7 | -4 |
+| `u32 pos`, `unsigned int n` (the typedef distinction of section 15) | 8 | -8 |
+| `unsigned int pos`, `u32 n`, `((int)(pos \| n)) \| ((int)(pos & n))`, `n` declared before `pos` | 8 | +0 |
+| `int`/`s32`/`long` `pos`, `u32` `n` | 10 | -12 |
+| `((int)(pos \| n)) \| ((int)(pos & n))`, `pos` declared before `n` | 10 | -8 |
+
+Two spellings that look like they should work and do not, both for the same
+reason - **a conversion that only feeds a comparison against zero is dropped**:
+
+* `int g = pos | n; if (g)` - the cast disappears and `g` becomes the unsigned
+  IOR itself, so `uncprop` is not blocked *and* VRP's
+  `register_edge_assert_for` sees a bare `BIT_IOR_EXPR` again and proves `n`
+  zero on the main path, which costs four more bytes;
+* `int g = (pos | n) | (pos & n); if (g)` - same, and identical to the
+  baseline.
+
+Only the *inner* casts survive, because there the outer `|` is genuinely
+`int`-typed and GIMPLE's type correctness requires them.
+
 Swept, all compiled and scored against the shipped bytes: 2,592 structural
 shapes; 16,807 type combinations over six locals; 5,184 more crossing the
 types with three guards; 4,320 over all 720 declaration orders; 11,520 over
