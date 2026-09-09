@@ -299,27 +299,6 @@ int check_sn_valid(void)
 }
 
 
-int ez_probe_req_handler(u8 *pframe, int len)
-{
-	u8 *buf = pframe + 24;
-	int probe_len = len - 24;
-	int offset;
-
-	printk("\n  ez_probe_req_handler probe_len=%d! \n", probe_len);
-
-	offset = check_probe_sync_EID(buf, probe_len);
-	if (offset > 0) {
-		u8 ie_len = buf[offset + 1];
-
-		ez_new_sc.len = ie_len;
-		memcpy(ez_new_sc.buf, &buf[offset + 2], ie_len);
-		ez_new_sc.done = 1;
-		printk("\r\n!!!!!!!!!!GET AP DTAT  SUCCESS!!!!!!!!!!!!!!!!!!\r\n");
-	}
-
-	return 0;
-}
-
 int check_probe_sync_eid208(u8 *buf, int len)
 {
 	char sync_code[EZ_SYNC_CODE_LEN + 1] = "EZVIZ";
@@ -411,6 +390,27 @@ int ez_probe_requst_eid208_handler(u8 *pframe, int len)
 	       probe_resp_t.value);
 
 	return offset;
+}
+
+int ez_probe_req_handler(u8 *pframe, int len)
+{
+	u8 *buf = pframe + 24;
+	int probe_len = len - 24;
+	int offset;
+
+	printk("\n  ez_probe_req_handler probe_len=%d! \n", probe_len);
+
+	offset = check_probe_sync_EID(buf, probe_len);
+	if (offset > 0) {
+		u8 ie_len = buf[offset + 1];
+
+		ez_new_sc.len = ie_len;
+		memcpy(ez_new_sc.buf, &buf[offset + 2], ie_len);
+		ez_new_sc.done = 1;
+		printk("\r\n!!!!!!!!!!GET AP DTAT  SUCCESS!!!!!!!!!!!!!!!!!!\r\n");
+	}
+
+	return 0;
 }
 
 int ez_scan_device_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cmd)

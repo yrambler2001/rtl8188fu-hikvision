@@ -72,6 +72,13 @@ static char other_country_code_table[] =
 	"ER\0ET\0GH\0GM\0GN\0GQ\0GW\0KM\0KP\0LR\0MG\0MH\0MM\0MU\0NE\0NG\0NR\0"
 	"NU\0PS\0RW\0SB\0SD\0SL\0SO\0ST\0SY\0TO\0TP\0TV";
 
+struct ez_rssi_per_ant {
+	u8	Valid;
+	s8	Rssi_ANT0;
+	s8	Rssi_ANT1;
+	s8	Rssi_AVG;
+};
+
 u8 ez_mac_addr[17];
 
 const u8 invalid_efuse_data1[10] = {
@@ -329,13 +336,6 @@ void ez_wifi_version_info(void)
 	printk("build time:%s  %s\r\n", __DATE__, __TIME__);
 }
 
-struct ez_rssi_per_ant {
-	u8	Valid;
-	s8	Rssi_ANT0;
-	s8	Rssi_ANT1;
-	s8	Rssi_AVG;
-};
-
 int ez_wifi_preinit(void)
 {
 	struct file *fp = NULL;
@@ -425,7 +425,6 @@ int ez_read_rssi_per_ant_ioctl(struct net_device *dev, struct ifreq *rq, int cmd
 	struct iwreq *wrq = (struct iwreq *)rq;
 	HAL_DATA_TYPE *pHalData;
 	struct dm_struct *pDM_Odm;
-	struct recv_priv *precvpriv;
 	struct ez_rssi_per_ant rssi;
 
 	printk("\n ####### ez_read_rssi_per_ant_ioctl ENTER  , cmd = %x\n", cmd);
@@ -443,7 +442,6 @@ int ez_read_rssi_per_ant_ioctl(struct net_device *dev, struct ifreq *rq, int cmd
 
 do_read:
 	padapter = (_adapter *)rtw_netdev_priv(dev);
-	precvpriv = &padapter->recvpriv;
 	pHalData = GET_HAL_DATA(padapter);
 	pDM_Odm = &pHalData->odmpriv;
 
@@ -453,7 +451,7 @@ do_read:
 	       HDATA_RATE(pDM_Odm->rx_rate), pDM_Odm->rssi_a, pDM_Odm->rssi_b);
 
 	rssi.Valid = 1;
-	rssi.Rssi_AVG = precvpriv->rssi;
+	rssi.Rssi_AVG = padapter->recvpriv.rssi;
 	rssi.Rssi_ANT0 = pDM_Odm->rssi_a - 100;
 	rssi.Rssi_ANT1 = pDM_Odm->rssi_a - 100;
 
