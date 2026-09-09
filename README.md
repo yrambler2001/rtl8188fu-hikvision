@@ -209,6 +209,38 @@ exactly, so each interval carries one clearly-labelled placeholder of that size
 uniquifiers match and `.strtab` is byte-identical. They are placeholders, not
 recovered vendor code, and are commented as such.
 
+### 3.7 What is reconstruction and what is recovered
+
+The OEM sources compile to the shipped bytes; they are **not** the vendor's
+text, and nothing in the binary can make them so. Three classes, in decreasing
+order of confidence:
+
+1. **Recovered.** Every fact that the binary states: the function set and their
+   sizes and addresses; the data objects and their sizes; all 115 strings; the
+   call graph (from the `BL` targets); the source order (from the `DECL_UID`
+   uniquifiers, §3.6); the block layout inside each function (which at `-Os` is
+   source order, `FINDINGS-oem-catalogue.md` §12); and, for 44 of the 46
+   functions, an instruction sequence that matches word for word.
+2. **Constrained but not determined.** Identifier names of locals, parameters
+   and non-exported functions (the shipped module is unstripped, so *global*
+   names are recovered; locals are not), comments, whitespace, and any spelling
+   choice the compiler normalises away. Where two spellings compile identically
+   the reconstruction picks the one that reads most like the surrounding
+   Realtek code.
+3. **Deliberate devices.** Three places carry a construct chosen because it
+   reproduces a compiler decision, and each is commented in the source and
+   written up in the catalogue:
+   * the 65 `*_uid_gap_*` enum and typedef placeholders that stand in for
+     declarations which emit no code (§3.6);
+   * `ez_scan_device_ioctl_handle`'s duplicated tail and `ez_strsep`'s
+     duplicated `memmove` arm, which are how a shared tail is written when
+     cross-jumping - not a `goto` (§19);
+   * `ez_strsep`'s `*(char * volatile *)stringp = r`, which keeps GCC's
+     temporary-expression replacement from sinking `q + 1` past the NUL store
+     (§18). The qualifier does not survive to the output; a `goto` to a
+     mid-loop label reproduces the same bytes, so the binary does not choose
+     between them.
+
 ## 4. Result
 
 | metric | result |
@@ -369,25 +401,45 @@ that is what hid barrier 6 (§3.6).
 
 ## 6. Verification
 
+`build/verify.sh` exports HEAD with `git archive`, builds it twice in the
+container, and scores the result:
+
 ```
-$ python3 build/fulldiff.py /path/to/8188fu.ko ./8188fu.ko --brief
+$ sh build/verify.sh /path/to/8188fu.ko
+== exporting HEAD to ./cleanchk
+== building
+== determinism: rebuilding
+   build is deterministic
+== scoreboard
+   .text                                  172  89.6%          96  content 172, (+24 branch displacements)
+   .note.gnu.build-id                      20  10.4%          20  content 20
+
+== SUMMARY
    STRUCTURAL  192 bytes differ (0.010% of the shipped 1,918,056)
-   RAW         116 bytes differ positionally (0.0060%)
+   RAW         116 bytes differ positionally (0.01%)
+   link layout inside otherwise-matching symbols: 0 bytes of relocation addends, 24 bytes of B/BL displacements
    byte-identical sections: 39/41
-
-$ cmp /path/to/8188fu.ko ./8188fu.ko
-/path/to/8188fu.ko ./8188fu.ko differ: char 69, line 1
-
-$ sha256sum /path/to/8188fu.ko ./8188fu.ko
-a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  8188fu.ko   (shipped)
-b2e014d2554540023997ed39ff32371cc30925d9081528ad6ef04d4dbf2b9809  8188fu.ko   (ours)
+== hashes
+a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  8188fu.ko  (shipped)
+b2e014d2554540023997ed39ff32371cc30925d9081528ad6ef04d4dbf2b9809  8188fu.ko  (ours)
+== cmp
+... differ: char 69, line 1
 ```
 
 `cmp` is **not** clean, and the numbers above are the honest statement of how
-far this got. The first differing byte is at offset 68, inside the
+far this got.  Two consecutive builds of the same clean checkout are
+byte-identical to each other, and the clean checkout is byte-identical to the
+working tree's build, so nothing the build needs is untracked and nothing in it
+is non-deterministic.  The first differing byte is at offset 68, inside the
 `.note.gnu.build-id` SHA-1 — a hash of the two functions in §4, which cannot
-match until they do. Everything before it, including `e_shoff` and the whole
+match until they do.  Everything before it, including `e_shoff` and the whole
 section header table, is right.
+
+**Every masking rule in the harness is enumerated in
+`FINDINGS-oem-catalogue.md` §22**, together with the check that covers it, and
+the audit was tested the only way an audit can be: by reverting the §20
+placement fix and confirming that both symbolic verdicts stayed silent while
+RAW went 116 → 519 and the byte-identical section count 39 → 34.
 
 **Two counts, and which to use.** `fulldiff.py`'s *structural* count matches
 symbols by name and charges a function whose size is wrong only its size
@@ -430,5 +482,8 @@ FINDINGS-driver-config.md               barrier 3
 FINDINGS-byte-gap.md                    the whole-file scoreboard and barrier 4
 FINDINGS-toolchain.md                   barrier 1
 FINDINGS-oem-catalogue.md               barriers 5 and 6 - the OEM code, in full
+                                        (section 22 is the harness audit:
+                                         every masked field and the check
+                                         that covers it)
 PLAN.md                                 work packages and status
 ```
