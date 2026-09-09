@@ -15,12 +15,12 @@
 #define _IOCTL_LINUX_C_
 
 #include <drv_types.h>
+#include <ez_wifi_fn.h>
 #include <rtw_mp.h>
 #include "../../hal/phydm/phydm_precomp.h"
 #ifdef RTW_HALMAC
 #include "../../hal/hal_halmac.h"
-/* OEM (EZVIZ) patch line-count reconciliation: the shipped rtw_wx_set_priv's
- * __LINE__ is 7840 where the tarball gives 7838. See core/rtw_mlme_ext.c. */
+/* Line-count reconciliation: rtw_wx_set_priv __LINE__ 7838 -> 7840, see core/rtw_mlme_ext.c. */
 #endif
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 27))

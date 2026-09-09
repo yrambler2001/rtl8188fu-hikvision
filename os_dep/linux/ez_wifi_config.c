@@ -14,6 +14,7 @@
 #include <hal_data.h>
 #include "../../hal/phydm/phydm_precomp.h"
 #include <ez_wifi.h>
+#include <ez_wifi_fn.h>
 
 /* module parameters, defined in os_dep/linux/os_intfs.c */
 extern int rtw_channel_plan;

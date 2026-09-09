@@ -1109,6 +1109,8 @@ extern void rtd2885_wlan_netlink_sendMsg(char *action_string, char *name);
  * notes: drv_init() is called when the bus driver has located a card for us to support.
  *        We accept the new device by returning 0.
 */
+int ez_wifi_preinit(void);
+
 _adapter *rtw_usb_primary_adapter_init(struct dvobj_priv *dvobj,
 	struct usb_interface *pusb_intf)
 {

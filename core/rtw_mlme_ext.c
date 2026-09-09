@@ -16,43 +16,37 @@
 
 #include <drv_types.h>
 #include <hal_data.h>
+#include <ez_wifi_fn.h>
+
+/* One more declaration than the OEM header provides: the shipped module's
+ * __func__ uniquifiers put the vendor's rtw_mlme_ext.c one DECL_UID ahead of
+ * ours from its first function onwards.  See FINDINGS-oem-catalogue.md #11. */
+extern u8 ez_unrecovered_decl;
 /*
  * OEM (EZVIZ) patch line-count reconciliation.
  *
- * The shipped module pins how many lines the vendor added to this file above
- * collect_bss_info(): its __LINE__ constant is 10582 where the pristine Realtek
- * v5.15.3 tarball gives 10521, so the vendor's rtw_mlme_ext.c carries exactly
- * 61 more lines before that point (FINDINGS-driver-config.md).
+ * The shipped module pins how many lines the vendor added above
+ * collect_bss_info(): its __LINE__ is 10582 where the pristine Realtek
+ * v5.15.3 tarball gives 10521, so the vendor's rtw_mlme_ext.c carries 61 more
+ * lines before that point (FINDINGS-driver-config.md).  Twenty-one are
+ * recovered and are in this file: three for `int ez_ret;` in OnProbeReq(),
+ * fourteen for the smart-config / EID-208 block it runs before looking for the
+ * SSID element, four for the ez_probe_response_eid208_handler() call in
+ * OnProbeRsp().  Every instruction of all three is byte-identical, so the code
+ * the vendor added above collect_bss_info() is fully accounted for; the rest
+ * emitted nothing - comments, blank lines, a different wrapping style, or
+ * edits inside a block this build compiles out - and is reproduced as this
+ * comment so that __LINE__ downstream matches.  The same reconciliation is
+ * applied to os_dep/linux/ioctl_linux.c (rtw_wx_set_priv's __LINE__ 7838 ->
+ * 7840) and core/efuse/rtw_efuse.c (2875 -> 2876, 3024 -> 3025).
  *
- * Twenty-one of those are recovered from the binary and are in this file:
- * three for the `int ez_ret;` declaration in OnProbeReq(), fourteen for the
- * smart-config / EID-208 block that OnProbeReq() runs just before it looks for
- * the SSID element, and four for the ez_probe_response_eid208_handler() call in
- * OnProbeRsp().  Every instruction of all three is byte-identical to the
- * shipped module, so the *code* the vendor added above collect_bss_info() is
- * fully accounted for.
+ * If a later pass recovers real vendor code, or adds a declaration, above
+ * collect_bss_info(), shrink this comment by the same number of lines: what
+ * has to stay fixed is collect_bss_info()'s __LINE__, not this block's size.
  *
- * The remaining lines emitted no code: comments, blank lines, a different
- * brace or wrapping style, or edits inside a block this build compiles out.
- * The binary cannot say which.  They are reproduced here as this comment so
- * that __LINE__ downstream of it matches the shipped module exactly; that is
- * the whole of their observable effect.  Do not delete these lines without
- * adding the same number back somewhere above collect_bss_info().
- *
- *   pristine tarball   collect_bss_info() RTW_INFO at line 10521
  *   shipped module     collect_bss_info() RTW_INFO at line 10582
  *   this file          must also put it at line 10582
  *
- * The same reconciliation is applied, at much smaller scale, to
- * os_dep/linux/ioctl_linux.c (+2 lines above rtw_wx_set_priv, whose __LINE__
- * goes 7838 -> 7840) and to core/efuse/rtw_efuse.c (+1 line above both efuse
- * map writers, 2875 -> 2876 and 3024 -> 3025).  In those two files the vendor's
- * additions produced no recoverable code at all above the constrained point,
- * so the whole delta is comment.
- *
- * If a later pass recovers real vendor code that belongs above
- * collect_bss_info(), shrink this comment by the number of lines it adds - what
- * has to stay fixed is collect_bss_info()'s __LINE__, not this block's size.
  * Verify with:  build/oem/pub.sh core/rtw_mlme_ext.c collect_bss_info
  */
 
@@ -955,6 +949,12 @@ u32 p2p_listen_state_process(_adapter *padapter, unsigned char *da)
 Following are the callback functions for each subtype of the management frames
 
 *****************************************************************************/
+
+/* Two more DECL_UIDs, again read off the shipped __func__ uniquifiers: the
+ * vendor's file gains two declarations between init_mlme_default_rate_set()
+ * and OnProbeRsp().  A re-declaration of a no-argument OEM entry point just
+ * above the two handlers that call into ez_sc.c costs exactly that. */
+int check_scan_flag(void);
 
 unsigned int OnProbeReq(_adapter *padapter, union recv_frame *precv_frame)
 {

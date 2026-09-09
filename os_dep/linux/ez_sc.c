@@ -10,6 +10,7 @@
 
 #include <drv_types.h>
 #include <ez_wifi.h>
+#include <ez_wifi_fn.h>
 
 static s8 err_status;
 u8 smart_flg;
