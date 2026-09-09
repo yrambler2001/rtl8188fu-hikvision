@@ -4,8 +4,17 @@
  * (MAC address and country code), efuse readback, and the RSSI / version /
  * RF-calibration private ioctls.
  *
- * Reconstructed from the shipped 8188fu.ko; not part of any public Realtek
- * release.  See FINDINGS-oem-catalogue.md.
+ * Not part of any public Realtek release.
+ *
+ * PROVENANCE.  This file is a reconstruction, produced by decompiling the
+ * shipped 8188fu.ko.  It is not the vendor's original text and cannot be:
+ * a binary determines object code, not the spelling of the source that
+ * produced it.  What is checkable is that this file compiles to
+ * byte-identical object code, at the shipped addresses and sizes.  The
+ * driver is GPLv2, so the vendor's derivative work is itself covered by the
+ * GPL; this reconstruction exists to demonstrate and verify reproducibility.
+ * See README.md section 8.2, and FINDINGS-oem-catalogue.md for the
+ * function-by-function derivation.
  *
  *****************************************************************************/
 #define _EZ_WIFI_CONFIG_C_

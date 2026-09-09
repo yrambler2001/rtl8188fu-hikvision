@@ -1,14 +1,34 @@
+# kbuild output
 *.o
 *.ko
 *.mod.c
 *.mod
 *.cmd
+*.a
+*.su
 .tmp_versions/
 Module.symvers
 modules.order
 *.markers
 *.symvers
 *.d
+
+# harness scratch
 __pycache__/
 build/oem/lab/
 cleanchk/
+.verify-build.log
+.verify-first.ko
+
+# the shipped module, if you drop a copy here to score against
+8188fu.ko.shipped
+
+# vendor kernel, if fetched into the tree
+linux-vendor/
+linux-openipc/
+
+# editor / OS / patch leftovers
+.DS_Store
+*.orig
+*.rej
+*~

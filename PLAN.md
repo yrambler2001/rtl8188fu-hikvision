@@ -1,6 +1,6 @@
 # Plan: byte-exact reproduction of the shipped `8188fu.ko`
 
-Reference: `/path/to/8188fu.ko`, 1,918,056 bytes,
+Reference: the shipped `8188fu.ko`, 1,918,056 bytes,
 SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
 3,939 symbols / 975,780 bytes of `.text`.
 

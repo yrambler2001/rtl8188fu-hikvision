@@ -8,13 +8,17 @@ single driver-side struct discrepancy, described at the end.
 
 ## The tree
 
-`/path/to/linux-4.9.129-fullhan-pristine`
-(752 MB) is stock Linux 4.9.129 with the Fullhan vendor patch
-(`0000-fh8852-kernel-4.9.129.vendor.patch`) applied and nothing else — in
-particular no OpenIPC changes. It carries `arch/arm/mach-fh/` with six board
-directories (`fh885{2,6,8}v2{0,1}0`) and twelve matching entries in
-`arch/arm/configs/`, which are byte-identical to the copies in
-`vendor-kernel/defconfigs/`.
+The tree this work builds against (752 MB) is stock Linux 4.9.129 with the
+Fullhan vendor patch (`0000-fh8852-kernel-4.9.129.vendor.patch`) applied and
+nothing else — in particular no OpenIPC changes. It carries `arch/arm/mach-fh/`
+with six board directories (`fh885{2,6,8}v2{0,1}0`) and twelve matching entries
+in `arch/arm/configs/`.
+
+It is publicly fetchable: **`OpenIPC/linux` at commit `6bde37dba95d`**, whose
+commit message is that patch's own filename. `build/fetch-vendor-kernel.sh`
+shallow-fetches exactly that commit, which is what CI does; a tree obtained any
+other way is checked by the same thing everything else is, the SHA-256 of the
+module it produces.
 
 Those twelve "defconfigs" are not minimal defconfigs; they are full 2253-line
 `.config` dumps. They differ only in `CONFIG_FH_CHIP_NAME` and `CONFIG_MACH_*`,
