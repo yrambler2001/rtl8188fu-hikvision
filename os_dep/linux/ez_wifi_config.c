@@ -35,55 +35,41 @@ extern char *rtw_initmac;
 #define EZ_RF_CRYSTAL_CALIBRATION	0xB9
 #define EZ_RF_CRYSTAL_THERMAL_METER	0xBA
 
-static char us_country_code_table[][3] = {
-	"US", "CA", "MX", "TW", "VI", "DO", "GT"
-};
+static char us_country_code_table[] =
+	"US\0CA\0MX\0TW\0VI\0DO\0GT";
 
-static char br_country_code_table[][3] = {
-	"BR", "CO", "BB", "CR", "EC", "UY", "BM", "DM", "GY", "HT", "TT", "NI",
-	"HN", "PA", "VE", "PY", "BS", "FM", "GD", "JM", "PW", "SV", "VU", "CL",
-	"AR", "IN", "PK"
-};
+static char br_country_code_table[] =
+	"BR\0CO\0BB\0CR\0EC\0UY\0BM\0DM\0GY\0HT\0TT\0NI\0HN\0PA\0VE\0PY\0BS\0"
+	"FM\0GD\0JM\0PW\0SV\0VU\0CL\0AR\0IN\0PK";
 
-static char etsi_country_code_table[][3] = {
-	"AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GB",
-	"GR", "HR", "HU", "IE", "IT", "LU", "MT", "NL", "PL", "PT", "RO", "SE",
-	"SI", "SK", "TR", "LV", "LT", "KW", "KZ", "LB", "AD", "AM", "AZ", "BD",
-	"GE", "HK", "KG", "LK", "MD", "MN", "MP", "MR", "NA", "PG", "TD", "TJ",
-	"TM", "UZ", "ZW", "IR", "OM", "SG", "TH", "VN", "ZA", "JO", "BY", "RU",
-	"IL", "SA", "IQ", "AG", "AL", "AO", "BA", "BJ", "BZ", "CH", "CM", "CV",
-	"FJ", "GA", "IS", "KH", "KI", "KN", "LA", "LC", "LI", "LY", "MC", "MK",
-	"ML", "MO", "MV", "MZ", "NO", "NP", "RS", "SC", "SM", "SN", "SZ", "TG",
-	"TN", "TZ", "UG", "VA", "VC", "WS", "YE", "ZM", "AU", "MY", "PH", "ID",
-	"AE", "KR", "NZ", "KE", "LS", "EG", "UA", "MA", "QA", "EU"
-};
+static char etsi_country_code_table[] =
+	"AT\0BE\0BG\0CY\0CZ\0DE\0DK\0EE\0ES\0FI\0FR\0GB\0GR\0HR\0HU\0IE\0IT\0"
+	"LU\0MT\0NL\0PL\0PT\0RO\0SE\0SI\0SK\0TR\0LV\0LT\0KW\0KZ\0LB\0AD\0AM\0"
+	"AZ\0BD\0GE\0HK\0KG\0LK\0MD\0MN\0MP\0MR\0NA\0PG\0TD\0TJ\0TM\0UZ\0ZW\0"
+	"IR\0OM\0SG\0TH\0VN\0ZA\0JO\0BY\0RU\0IL\0SA\0IQ\0AG\0AL\0AO\0BA\0BJ\0"
+	"BZ\0CH\0CM\0CV\0FJ\0GA\0IS\0KH\0KI\0KN\0LA\0LC\0LI\0LY\0MC\0MK\0ML\0"
+	"MO\0MV\0MZ\0NO\0NP\0RS\0SC\0SM\0SN\0SZ\0TG\0TN\0TZ\0UG\0VA\0VC\0WS\0"
+	"YE\0ZM\0AU\0MY\0PH\0ID\0AE\0KR\0NZ\0KE\0LS\0EG\0UA\0MA\0QA\0EU";
 
-static char eu_country_code_table[][3] = {
-	"AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GB",
-	"GR", "HR", "HU", "IE", "IT", "LU", "MT", "NL", "PL", "PT", "RO", "SE",
-	"SI", "SK", "TR", "LV", "LT", "EU", "NO", "AD", "CH", "IS", "MC", "MK"
-};
+static char eu_country_code_table[] =
+	"AT\0BE\0BG\0CY\0CZ\0DE\0DK\0EE\0ES\0FI\0FR\0GB\0GR\0HR\0HU\0IE\0IT\0"
+	"LU\0MT\0NL\0PL\0PT\0RO\0SE\0SI\0SK\0TR\0LV\0LT\0EU\0NO\0AD\0CH\0IS\0"
+	"MC\0MK";
 
-static char apec_country_code_table[][3] = {
-	"KW", "KZ", "LB", "AD", "AM", "AZ", "BD", "GE", "HK", "KG", "LK", "MD",
-	"MN", "MP", "MR", "NA", "PG", "TD", "TJ", "TM", "UZ", "ZW", "IR", "OM",
-	"SG", "TH", "VN", "ZA", "JO", "BY", "RU", "IL", "SA", "IQ", "AG", "AL",
-	"AO", "BA", "BJ", "BZ", "CH", "CM", "CV", "FJ", "GA", "IS", "KH", "KI",
-	"KN", "LA", "LC", "LI", "LY", "MC", "MK", "ML", "MO", "MV", "MZ", "NO",
-	"NP", "RS", "SC", "SM", "SN", "SZ", "TG", "TN", "TZ", "UG", "VA", "VC",
-	"WS", "YE", "ZM", "AU", "MY", "PH", "ID", "AE", "KR"
-};
+static char apec_country_code_table[] =
+	"KW\0KZ\0LB\0AD\0AM\0AZ\0BD\0GE\0HK\0KG\0LK\0MD\0MN\0MP\0MR\0NA\0PG\0"
+	"TD\0TJ\0TM\0UZ\0ZW\0IR\0OM\0SG\0TH\0VN\0ZA\0JO\0BY\0RU\0IL\0SA\0IQ\0"
+	"AG\0AL\0AO\0BA\0BJ\0BZ\0CH\0CM\0CV\0FJ\0GA\0IS\0KH\0KI\0KN\0LA\0LC\0"
+	"LI\0LY\0MC\0MK\0ML\0MO\0MV\0MZ\0NO\0NP\0RS\0SC\0SM\0SN\0SZ\0TG\0TN\0"
+	"TZ\0UG\0VA\0VC\0WS\0YE\0ZM\0AU\0MY\0PH\0ID\0AE\0KR";
 
-static char jp_country_code_table[][3] = {
-	"JP"
-};
+static char jp_country_code_table[] =
+	"JP";
 
-static char other_country_code_table[][3] = {
-	"CN", "AF", "BF", "BH", "BI", "BN", "BO", "BT", "BW", "CD", "CF", "CG",
-	"CI", "CK", "CU", "DJ", "DZ", "ER", "ET", "GH", "GM", "GN", "GQ", "GW",
-	"KM", "KP", "LR", "MG", "MH", "MM", "MU", "NE", "NG", "NR", "NU", "PS",
-	"RW", "SB", "SD", "SL", "SO", "ST", "SY", "TO", "TP", "TV"
-};
+static char other_country_code_table[] =
+	"CN\0AF\0BF\0BH\0BI\0BN\0BO\0BT\0BW\0CD\0CF\0CG\0CI\0CK\0CU\0DJ\0DZ\0"
+	"ER\0ET\0GH\0GM\0GN\0GQ\0GW\0KM\0KP\0LR\0MG\0MH\0MM\0MU\0NE\0NG\0NR\0"
+	"NU\0PS\0RW\0SB\0SD\0SL\0SO\0ST\0SY\0TO\0TP\0TV";
 
 u8 ez_mac_addr[17];
 
@@ -213,9 +199,9 @@ int woal_is_us_country(char *country_code)
 {
 	int i;
 
-	for (i = 0; i < sizeof(us_country_code_table) / sizeof(us_country_code_table[0]); i++) {
-		if (!memcmp(country_code, us_country_code_table[i], 2)) {
-			printk("found region code=%s in US table.\n", us_country_code_table[i]);
+	for (i = 0; i < sizeof(us_country_code_table); i += 3) {
+		if (!memcmp(country_code, &us_country_code_table[i], 2)) {
+			printk("found region code=%s in US table.\n", &us_country_code_table[i]);
 			return 1;
 		}
 	}
@@ -227,9 +213,9 @@ int woal_is_br_country(char *country_code)
 {
 	int i;
 
-	for (i = 0; i < sizeof(br_country_code_table) / sizeof(br_country_code_table[0]); i++) {
-		if (!memcmp(country_code, br_country_code_table[i], 2)) {
-			printk("found region code=%s in BR table.\n", br_country_code_table[i]);
+	for (i = 0; i < sizeof(br_country_code_table); i += 3) {
+		if (!memcmp(country_code, &br_country_code_table[i], 2)) {
+			printk("found region code=%s in BR table.\n", &br_country_code_table[i]);
 			return 1;
 		}
 	}
@@ -241,9 +227,9 @@ int woal_is_etsi_country(char *country_code)
 {
 	int i;
 
-	for (i = 0; i < sizeof(etsi_country_code_table) / sizeof(etsi_country_code_table[0]); i++) {
-		if (!memcmp(country_code, etsi_country_code_table[i], 2)) {
-			printk("found region code=%s in ETSI table\n", etsi_country_code_table[i]);
+	for (i = 0; i < sizeof(etsi_country_code_table); i += 3) {
+		if (!memcmp(country_code, &etsi_country_code_table[i], 2)) {
+			printk("found region code=%s in ETSI table\n", &etsi_country_code_table[i]);
 			return 1;
 		}
 	}
@@ -255,9 +241,9 @@ int woal_is_eu_country(char *country_code)
 {
 	int i;
 
-	for (i = 0; i < sizeof(eu_country_code_table) / sizeof(eu_country_code_table[0]); i++) {
-		if (!memcmp(country_code, eu_country_code_table[i], 2)) {
-			printk("found region code=%s in EU table\n", eu_country_code_table[i]);
+	for (i = 0; i < sizeof(eu_country_code_table); i += 3) {
+		if (!memcmp(country_code, &eu_country_code_table[i], 2)) {
+			printk("found region code=%s in EU table\n", &eu_country_code_table[i]);
 			return 1;
 		}
 	}
@@ -269,9 +255,9 @@ int woal_is_apec_country(char *country_code)
 {
 	int i;
 
-	for (i = 0; i < sizeof(apec_country_code_table) / sizeof(apec_country_code_table[0]); i++) {
-		if (!memcmp(country_code, apec_country_code_table[i], 2)) {
-			printk("found region code=%s in APEC table\n", apec_country_code_table[i]);
+	for (i = 0; i < sizeof(apec_country_code_table); i += 3) {
+		if (!memcmp(country_code, &apec_country_code_table[i], 2)) {
+			printk("found region code=%s in APEC table\n", &apec_country_code_table[i]);
 			return 1;
 		}
 	}
@@ -283,9 +269,9 @@ int woal_is_jp_country(char *country_code)
 {
 	int i;
 
-	for (i = 0; i < sizeof(jp_country_code_table) / sizeof(jp_country_code_table[0]); i++) {
-		if (!memcmp(country_code, jp_country_code_table[i], 2)) {
-			printk("found region code=%s in JP table.\n", jp_country_code_table[i]);
+	for (i = 0; i < sizeof(jp_country_code_table); i += 3) {
+		if (!memcmp(country_code, &jp_country_code_table[i], 2)) {
+			printk("found region code=%s in JP table.\n", &jp_country_code_table[i]);
 			return 1;
 		}
 	}
@@ -297,9 +283,9 @@ int woal_is_other_country(char *country_code)
 {
 	int i;
 
-	for (i = 0; i < sizeof(other_country_code_table) / sizeof(other_country_code_table[0]); i++) {
-		if (!memcmp(country_code, other_country_code_table[i], 2)) {
-			printk("found region code=%s in other table.\n", other_country_code_table[i]);
+	for (i = 0; i < sizeof(other_country_code_table); i += 3) {
+		if (!memcmp(country_code, &other_country_code_table[i], 2)) {
+			printk("found region code=%s in other table.\n", &other_country_code_table[i]);
 			return 1;
 		}
 	}
@@ -359,16 +345,18 @@ int ez_read_rssi_per_ant_ioctl(struct net_device *dev, struct ifreq *rq, int cmd
 
 	printk("\n ####### ez_read_rssi_per_ant_ioctl ENTER  , cmd = %x\n", cmd);
 
-	if (!dev || !rq) {
+	if (dev && rq) {
+		if (wrq->u.data.pointer)
+			goto do_read;
+	} else {
 		printk("%s():  net or rq == NULL!\n", __func__);
 		return -1;
 	}
 
-	if (!wrq->u.data.pointer) {
-		printk("iwp == NULL or iwp->pointer == null!!!\n");
-		return -1;
-	}
+	printk("iwp == NULL or iwp->pointer == null!!!\n");
+	return -1;
 
+do_read:
 	padapter = (_adapter *)rtw_netdev_priv(dev);
 	precvpriv = &padapter->recvpriv;
 	pHalData = GET_HAL_DATA(padapter);
@@ -618,7 +606,7 @@ free_buf:
 		ez_os_close_image(fp);
 }
 
-int ez_GetMaskBit(void)
+u32 ez_GetMaskBit(void)
 {
 	printk("maskbit:0x%x\r\n", 0x9F);
 	return 0x9F;
@@ -631,25 +619,28 @@ int ez_GetWiFiVersion(char *version)
 	switch (maskbit) {
 	case 0x00:
 	case 0x80:
-		strcpy(version, "0.0.0_");
+		memcpy(version, "0.0.0_", 6);
+		memcpy(version + 6, EZ_WIFI_VERSION, sizeof(EZ_WIFI_VERSION));
 		break;
 	case 0x87:
-		strcpy(version, "1.0.0_");
+		memcpy(version, "1.0.0_", 6);
+		memcpy(version + 6, EZ_WIFI_VERSION, sizeof(EZ_WIFI_VERSION));
 		break;
 	case 0x8F:
-		strcpy(version, "1.0.1_");
+		memcpy(version, "1.0.1_", 6);
+		memcpy(version + 6, EZ_WIFI_VERSION, sizeof(EZ_WIFI_VERSION));
 		break;
 	case 0x97:
-		strcpy(version, "1.0.2_");
+		memcpy(version, "1.0.2_", 6);
+		memcpy(version + 6, EZ_WIFI_VERSION, sizeof(EZ_WIFI_VERSION));
 		break;
 	case 0x9F:
-		strcpy(version, "1.0.3_");
+		memcpy(version, "1.0.3_", 6);
+		memcpy(version + 6, EZ_WIFI_VERSION, sizeof(EZ_WIFI_VERSION));
 		break;
 	default:
-		return 0;
+		break;
 	}
-
-	strcat(version, EZ_WIFI_VERSION);
 
 	return 0;
 }
@@ -657,22 +648,22 @@ int ez_GetWiFiVersion(char *version)
 int ez_wifi_func_poll_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	struct iwreq *wrq = (struct iwreq *)rq;
-	char version[32];
+	char version[32] = {0};
 	u32 len;
 	int ret;
 
-	memset(version, 0, sizeof(version));
-
 	printk("\n ####### %s() Enter, cmd = %x\n", __func__, cmd);
 
-	if (!dev || !rq) {
+	if (dev && rq) {
+		if (!wrq->u.data.pointer) {
+			printk("iwp == NULL or iwp->pointer == null!!!\n");
+			ret = -1;
+			return ret;
+		}
+	} else {
 		printk("%s():  net or rq == NULL!\n", __func__);
-		return -1;
-	}
-
-	if (!wrq->u.data.pointer) {
-		printk("iwp == NULL or iwp->pointer == null!!!\n");
-		return -1;
+		ret = -1;
+		return ret;
 	}
 
 	ez_GetWiFiVersion(version);
@@ -806,34 +797,36 @@ int ez_wifi_module_rf_calibration_check_ioctl(struct net_device *dev, struct ifr
 
 	printk("\n ####### ez_wifi_module_rf_check_ioctl ENTER  , cmd = %x\n", cmd);
 
-	if (!padapter || !rq) {
+	if (padapter && rq) {
+		if (!wrq->u.data.pointer) {
+			printk("iwp == NULL or iwp->pointer == null!!!\n");
+			return ret;
+		}
+	} else {
 		printk("%s():  net or rq == NULL!\n", __func__);
 		return ret;
 	}
 
-	if (!wrq->u.data.pointer) {
-		printk("iwp == NULL or iwp->pointer == null!!!\n");
-		return ret;
+	{
+		efuse_mac_ret = ez_read_efuse_mac(padapter);
+		efuse_rf_ret = ez_read_efuse_rf(padapter);
+		free_block_ret = ez_read_eFuse_free_block(padapter);
+
+		if (efuse_mac_ret == -1 && efuse_rf_ret == -1)
+			rf_calibration_check_ret = 3;
+		else if (efuse_rf_ret == -1)
+			rf_calibration_check_ret = 2;
+		else if (efuse_mac_ret == -1)
+			rf_calibration_check_ret = 1;
+		else
+			rf_calibration_check_ret = 0;
+
+		if (free_block_ret == -1)
+			rf_calibration_check_ret = 4;
+
+		ret = copy_to_user(wrq->u.data.pointer, &rf_calibration_check_ret, 4);
+		printk("rf_calibration_check_ret == %d\n", rf_calibration_check_ret);
 	}
-
-	efuse_mac_ret = ez_read_efuse_mac(padapter);
-	efuse_rf_ret = ez_read_efuse_rf(padapter);
-	free_block_ret = ez_read_eFuse_free_block(padapter);
-
-	if (efuse_mac_ret == -1 && efuse_rf_ret == -1)
-		rf_calibration_check_ret = 3;
-	else if (efuse_rf_ret == -1)
-		rf_calibration_check_ret = 2;
-	else if (efuse_mac_ret == -1)
-		rf_calibration_check_ret = 1;
-	else
-		rf_calibration_check_ret = 0;
-
-	if (free_block_ret == -1)
-		rf_calibration_check_ret = 4;
-
-	ret = copy_to_user(wrq->u.data.pointer, &rf_calibration_check_ret, 4);
-	printk("rf_calibration_check_ret == %d\n", rf_calibration_check_ret);
 
 	return ret;
 }
