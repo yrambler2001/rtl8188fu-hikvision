@@ -85,11 +85,11 @@ const u8 invalid_efuse_data2[10] = {
 int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 {
 	u32 i;
-	int m = 0;
-	int end = 0;
 	int pos = 0;
+	int n = 0;
+	int m = 0;
 	int j = 0;
-	u16 n = 0;
+	int end = 0;
 
 	for (i = 0; i < len; i++) {
 		if (buf[i] == '\r')
