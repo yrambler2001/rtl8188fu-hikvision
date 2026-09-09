@@ -45,6 +45,37 @@ int check_scan_flag(void)
 	return scan_flag;
 }
 
+int check_probe_sync_EID(u8 *buf, int len)
+{
+	int sn_valid = check_sn_valid();
+	int i;
+
+	printk("\n  check_probe_sync_EID enter,sn_valid:%d! \n", sn_valid);
+
+	if (!buf) {
+		printk("check_probe_sync_EID input buf if NULL!\n");
+		return -1;
+	}
+
+	for (i = 0; i < len - 2; i += buf[i + 1] + 2) {
+		if (sn_valid) {
+			if ((buf[i] == 207 || buf[i] == 209)
+			    && !memcmp(&buf[i + 2], ez_sync_code, EZ_SYNC_CODE_LEN)) {
+				printk("\n %s: get ez_sync_code,suport 207 or 209! \n\r", __func__);
+				return i;
+			}
+		} else {
+			if (buf[i] == 207
+			    && !memcmp(&buf[i + 2], ez_sync_code, EZ_SYNC_CODE_LEN)) {
+				printk("\n %s: get ez_sync_code,only suport 207 \n\r", __func__);
+				return i;
+			}
+		}
+	}
+
+	return 0;
+}
+
 int set_scan_flag(int flag)
 {
 	scan_flag = flag ? 1 : 0;
@@ -267,36 +298,6 @@ int check_sn_valid(void)
 	return memcmp(DeviceInfo, null_sn, EZ_DEVICE_SN_LEN) != 0;
 }
 
-int check_probe_sync_EID(u8 *buf, int len)
-{
-	int sn_valid = check_sn_valid();
-	int i;
-
-	printk("\n  check_probe_sync_EID enter,sn_valid:%d! \n", sn_valid);
-
-	if (!buf) {
-		printk("check_probe_sync_EID input buf if NULL!\n");
-		return -1;
-	}
-
-	for (i = 0; i < len - 2; i += buf[i + 1] + 2) {
-		if (sn_valid) {
-			if ((buf[i] == 207 || buf[i] == 209)
-			    && !memcmp(&buf[i + 2], ez_sync_code, EZ_SYNC_CODE_LEN)) {
-				printk("\n %s: get ez_sync_code,suport 207 or 209! \n\r", __func__);
-				return i;
-			}
-		} else {
-			if (buf[i] == 207
-			    && !memcmp(&buf[i + 2], ez_sync_code, EZ_SYNC_CODE_LEN)) {
-				printk("\n %s: get ez_sync_code,only suport 207 \n\r", __func__);
-				return i;
-			}
-		}
-	}
-
-	return 0;
-}
 
 int ez_probe_req_handler(u8 *pframe, int len)
 {

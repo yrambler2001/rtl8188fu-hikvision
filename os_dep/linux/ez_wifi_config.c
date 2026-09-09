@@ -336,6 +336,89 @@ struct ez_rssi_per_ant {
 	s8	Rssi_AVG;
 };
 
+int ez_wifi_preinit(void)
+{
+	struct file *fp = NULL;
+	char *buf = NULL;
+	char *pick = NULL;
+
+	int len;
+	int ret = 0;
+
+	printk("%s: enter\n", __func__);
+
+	fp = ez_os_open_image(EZ_CONFIG_FILE);
+	if (!fp) {
+		RTW_ERR("%s: Ignore config file %s\n", __FUNCTION__, EZ_CONFIG_FILE);
+		ret = -1;
+		goto set_default;
+	}
+
+	buf = kmalloc(EZ_CONFIG_BUF_SIZE, GFP_KERNEL);
+	if (!buf) {
+		RTW_ERR("%s: Failed to allocate memory %d bytes\n", __FUNCTION__,
+			EZ_CONFIG_BUF_SIZE);
+		ret = -1;
+		goto set_default;
+	}
+
+	pick = kmalloc(EZ_PICK_BUF_SIZE, GFP_KERNEL);
+	if (!pick) {
+		RTW_ERR("%s: Failed to allocate memory %d bytes\n", __FUNCTION__,
+			EZ_PICK_BUF_SIZE);
+		ret = -1;
+		goto set_default;
+	}
+
+	len = ez_os_get_image_block(buf, EZ_CONFIG_BUF_SIZE, fp);
+	if (len > 0 && len < EZ_CONFIG_BUF_SIZE) {
+		buf[len] = '\0';
+		memset(pick, 0, EZ_PICK_BUF_SIZE);
+		len = process_config_vars(buf, len, pick, "ccode=");
+		if (len) {
+			if (len != 2) {
+				RTW_ERR("%s: the countrycode length is bad ! \n", __FUNCTION__);
+				pick = "CN";
+			}
+			RTW_ERR("%s: pick=%s,len=%d\n", __FUNCTION__, pick, len);
+			ret = 0;
+			ez_set_country(pick);
+		} else {
+			RTW_ERR("%s: error file content=%d\n", __FUNCTION__, 0);
+			ret = -1;
+		}
+	} else {
+		RTW_ERR("%s: error reading config file,set default countrycode: CN \n",
+			__FUNCTION__);
+		ret = -1;
+	}
+
+	ez_wifi_version_info();
+	ez_get_mac_addr();
+	if (!ret)
+		goto free_pick;
+
+set_default:
+	ret = -1;
+	ez_set_country("CN");
+	if (!pick)
+		goto free_buf;
+
+free_pick:
+	/* Yes, NULL.  The shipped module emits "mov r0, #0; bl kfree" here, under
+	 * the "pick != NULL" guard above -- so the vendor leaks the 1 KB pick
+	 * buffer on every probe.  Reproducing the bug is what makes this function
+	 * byte-identical; kfree(pick) differs in exactly this one instruction. */
+	kfree(NULL);
+free_buf:
+	if (buf)
+		kfree(buf);
+	if (fp)
+		ez_os_close_image(fp);
+
+	return ret;
+}
+
 int ez_read_rssi_per_ant_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	_adapter *padapter;
@@ -530,88 +613,6 @@ close:
 	return ret;
 }
 
-int ez_wifi_preinit(void)
-{
-	struct file *fp = NULL;
-	char *buf = NULL;
-	char *pick = NULL;
-
-	int len;
-	int ret = 0;
-
-	printk("%s: enter\n", __func__);
-
-	fp = ez_os_open_image(EZ_CONFIG_FILE);
-	if (!fp) {
-		RTW_ERR("%s: Ignore config file %s\n", __FUNCTION__, EZ_CONFIG_FILE);
-		ret = -1;
-		goto set_default;
-	}
-
-	buf = kmalloc(EZ_CONFIG_BUF_SIZE, GFP_KERNEL);
-	if (!buf) {
-		RTW_ERR("%s: Failed to allocate memory %d bytes\n", __FUNCTION__,
-			EZ_CONFIG_BUF_SIZE);
-		ret = -1;
-		goto set_default;
-	}
-
-	pick = kmalloc(EZ_PICK_BUF_SIZE, GFP_KERNEL);
-	if (!pick) {
-		RTW_ERR("%s: Failed to allocate memory %d bytes\n", __FUNCTION__,
-			EZ_PICK_BUF_SIZE);
-		ret = -1;
-		goto set_default;
-	}
-
-	len = ez_os_get_image_block(buf, EZ_CONFIG_BUF_SIZE, fp);
-	if (len > 0 && len < EZ_CONFIG_BUF_SIZE) {
-		buf[len] = '\0';
-		memset(pick, 0, EZ_PICK_BUF_SIZE);
-		len = process_config_vars(buf, len, pick, "ccode=");
-		if (len) {
-			if (len != 2) {
-				RTW_ERR("%s: the countrycode length is bad ! \n", __FUNCTION__);
-				pick = "CN";
-			}
-			RTW_ERR("%s: pick=%s,len=%d\n", __FUNCTION__, pick, len);
-			ret = 0;
-			ez_set_country(pick);
-		} else {
-			RTW_ERR("%s: error file content=%d\n", __FUNCTION__, 0);
-			ret = -1;
-		}
-	} else {
-		RTW_ERR("%s: error reading config file,set default countrycode: CN \n",
-			__FUNCTION__);
-		ret = -1;
-	}
-
-	ez_wifi_version_info();
-	ez_get_mac_addr();
-	if (!ret)
-		goto free_pick;
-
-set_default:
-	ret = -1;
-	ez_set_country("CN");
-	if (!pick)
-		goto free_buf;
-
-free_pick:
-	/* Yes, NULL.  The shipped module emits "mov r0, #0; bl kfree" here, under
-	 * the "pick != NULL" guard above -- so the vendor leaks the 1 KB pick
-	 * buffer on every probe.  Reproducing the bug is what makes this function
-	 * byte-identical; kfree(pick) differs in exactly this one instruction. */
-	kfree(NULL);
-free_buf:
-	if (buf)
-		kfree(buf);
-	if (fp)
-		ez_os_close_image(fp);
-
-	return ret;
-}
 
 u32 ez_GetMaskBit(void)
 {
