@@ -188,8 +188,8 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 		}
 		m = 1;
 zero_pos:
-		__asm__ __volatile__("");
 		pos = 0;
+		__asm__ __volatile__("" : "+r"(pos));
 	}
 
 	return j;
