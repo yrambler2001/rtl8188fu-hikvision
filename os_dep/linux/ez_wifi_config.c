@@ -108,16 +108,18 @@ const u8 invalid_efuse_data2[10] = {
  * enumerator, a typedef costs one, and nothing is emitted.  Delete one and
  * every `__func__.NNNN' after it in this file stops matching.
  * ------------------------------------------------------------------------ */
-/* before ez_set_country: 4 declarations */
+/* before ez_set_country: 9 declarations */
 enum ez_wifi_uid_gap_1 {
-	EZ_WIFI_UID_GAP_1_0, EZ_WIFI_UID_GAP_1_1, EZ_WIFI_UID_GAP_1_2
+	EZ_WIFI_UID_GAP_1_0, EZ_WIFI_UID_GAP_1_1, EZ_WIFI_UID_GAP_1_2,
+	EZ_WIFI_UID_GAP_1_3, EZ_WIFI_UID_GAP_1_4, EZ_WIFI_UID_GAP_1_5,
+	EZ_WIFI_UID_GAP_1_6, EZ_WIFI_UID_GAP_1_7
 };
 
 int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 {
 	u32 i;
-	int pos = 0;
-	int n = 0;
+	unsigned int pos = 0;
+	u32 n = 0;
 	int m = 0;
 	int j = 0;
 	int end = 0;
@@ -139,19 +141,23 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 			continue;
 		}
 
-		switch (buf[i]) {
-		case '#':
+		if (buf[i] == '#') {
 			n |= pos;
 			pos = 1;
 			continue;
-		case '\\':
+		}
+		else if (buf[i] == '\\') {
 			n = 1;
-			break;
-		case '\n':
+			pos = 0;
+			continue;
+		}
+		else if (buf[i] == '\n') {
 			end = pos | n;
 			n |= pos;
-			break;
-		default: {
+			pos = 0;
+			continue;
+		}
+		else {
 			size_t vlen = strlen(var);
 			int cmp = memcmp(&buf[i], var, vlen);
 
@@ -169,27 +175,31 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 				if (skip) {
 					end = 0;
 					m = 0;
-					break;
+					pos = 0;
+					continue;
 				}
 				end++;
-				if (!m)
-					break;
+				if (!m) {
+					pos = 0;
+					continue;
+				}
 			}
 			if (buf[i] != '\t') {
 				if (j) {
 					int last = pick[j - 1];
 
 					m = (last == ' ' && buf[i] == ' ');
-					if (m)
-						break;
+					if (m) {
+						pos = 0;
+						continue;
+					}
 				}
 				pick[j++] = buf[i];
 			}
 			m = 1;
-			break;
+			pos = 0;
+			continue;
 		}
-		}
-		pos = 0;
 	}
 
 	return j;
