@@ -4,17 +4,23 @@ A byte-level reproduction of the `8188fu.ko` shipped in a Hikvision/EZVIZ IP
 camera firmware (`root_b240427`), together with the reconstructed source of the
 two OEM translation units that are in no public Realtek release.
 
-**Current state: 1,421 of 1,918,056 bytes differ — 0.07% of the file**
-(228 by `fulldiff.py`'s shift-tolerant "structural" count; see §6 for why the
-two numbers differ).
-**35 of the 41 sections are byte-identical**, `.symtab` and `.strtab` among
-them: all 879 `__func__.NNNN` uniquifiers match, and every one of the 3,909
-function symbols has the shipped `st_size`. **Every relocation in the module
-matches** — all 31,299 in `.rel.text` and all 7,671 elsewhere — and `.text` is
-exactly 975,780 bytes. Three of the 3,909 functions differ in content: by 49
-words, by 5, and by 4. The other 3,906 are byte-identical, and none of the
-three differs for any semantic reason — all three are register-allocation
-tie-breaks.
+**Current state: 121 of 1,918,056 bytes differ — 0.0063% of the file**
+(a plain positional `cmp`; the shift-tolerant "structural" count in
+`fulldiff.py` says 228, and §6 explains why the two disagree).
+
+**39 of the 41 sections are byte-identical**, including `.rodata`,
+`.rodata.str1.1`, `.data`, `.bss`, `.symtab`, `.strtab`, `.modinfo`,
+`.comment`, all twelve relocation sections and all four exidx sections. Every
+one of the 3,909 function symbols is at the shipped **address** with the
+shipped **size**, all 879 `__func__.NNNN` uniquifiers match, and all 38,970
+relocations match. `.text` is exactly 975,780 bytes.
+
+Only two sections still differ:
+
+| section | bytes | what |
+|---|---:|---|
+| `.text` | 102 | three functions out of 3,909, all the right size, all differing only in which register the allocator picked |
+| `.note.gnu.build-id` | 19 | an SHA-1 over the linked output; converges last, by construction |
 
 ---
 
@@ -179,14 +185,21 @@ Reading them (`FINDINGS-oem-catalogue.md` §11) says the vendor's globally
 visible OEM header carried the types and the extern objects but **not** the
 function prototypes: those were declared where they are called. Splitting
 `include/ez_wifi.h` that way, and putting the prototypes in
-`include/ez_wifi_fn.h`, took the mismatch from 726 symbols to 16. It also fixes
-the vendor's *source order*, which `.text` order cannot (`.text` is reverse
-postorder of the call graph): three OEM functions were in the wrong place and
-have been moved. The last of those, `ez_probe_req_handler`, is confirmed twice
-over — it is the only placement that leaves every byte-identical OEM function
-byte-identical *and* makes every uniquifier interval non-negative, and it cuts
-the raw `.symtab` difference from 7,482 bytes to 3,312, because local symbols
-are emitted in source order.
+`include/ez_wifi_fn.h`, took the mismatch from 726 symbols to 16. It also
+constrains the vendor's *source order*, which `.text` order alone cannot:
+several OEM functions were in the wrong place and have been moved.
+
+Source order and `.text` order are two different constraints and both have to
+be satisfied. `.text` order is the reverse of `ipa_reverse_postorder`, a
+depth-first walk of the call graph, so a function drags its callees in front of
+it: `check_probe_sync_EID` is defined at line 48 of `ez_sc.c` and emitted near
+the end, immediately before `ez_probe_req_handler`, which calls it. Putting
+`ez_probe_req_handler` where the uniquifiers first suggested left that whole
+chain after the three EID208 handlers and cost 1,280 bytes across five sections
+— invisibly, because the per-function harness compares symbolically.
+`FINDINGS-oem-catalogue.md` §20 has the derivation; the answer is that it goes
+immediately after `check_probe_sync_EID`, which is the only position that
+satisfies both.
 
 The remaining 65 declarations the oracle demands emit no code — the kernel
 builds with `-Wno-unused-variable` — so **which** they were is not recoverable
@@ -207,37 +220,31 @@ recovered vendor code, and are commented as such.
 | `.rodata`, `.rodata.str1.1`, `.data`, `.bss`, `__param`, `__ksymtab*` | **byte-identical** |
 | `.ARM.exidx` and all 3 other exidx sections | **byte-identical** (3,909 unwind entries) |
 | `.strtab` | **byte-identical** (124,098 bytes) |
-| `.symtab` | **byte-identical** (172,496 bytes), uniquifiers, order and `st_size` included |
-| relocation sections | **all 12 match entry for entry** (38,970 relocations) |
-| `.text` | **exactly 975,780 bytes**, every symbol the right size |
+| `.symtab` | **byte-identical** (172,496 bytes): uniquifiers, order, `st_size` **and `st_value`** |
+| relocation sections | **all 12 byte-identical** (38,970 relocations) |
+| `.text` | **exactly 975,780 bytes**, every symbol at the right address and the right size |
 | compiled source files | **159 / 159** |
 | function symbols | **3,909 / 3,909**, none missing, none extra |
 | byte-identical functions in `.text` | **3,906 / 3,909** |
 | local symbol uniquifiers | **879 / 879** |
-| byte-identical sections | **35 / 41** |
-| **whole file** | **1,421 of 1,918,056 bytes differ (0.07%)**; 228 by the structural count |
+| byte-identical sections | **39 / 41** |
+| **whole file** | **121 of 1,918,056 bytes differ (0.0063%)** |
 
 ### What still differs
 
-| section | structural | raw | what |
-|---|---:|---:|---|
-| `.text` | 208 | 1,002 | content in three functions; the section is the right length and every symbol the right size |
-| `.note.gnu.build-id` | 20 | 20 | an SHA-1 of the linked output; converges last, by construction |
-| everything else | 0 | 399 | relocation addends and `B`/`BL` displacements inside those three functions |
+| function | bytes | words | edit distance | cause |
+|---|---:|---:|---:|---|
+| `process_config_vars` | 79 | 44 of 86 | 5 | Two named GCC decisions. `uncprop` rewrites all seven main-path `pos = 0` PHI arguments into the guard temp, and out-of-SSA's coalesce costs accumulate *per edge*, so seven beats pos's own two: the `orr` writes pos's register and pos needs a second one plus a latch copy. And the shipped build materialises `m` with a dead `moveq #1` / `movne #0` pair where ours branches straight to the shared `m = 1`, because VRP proves the flag is 1 on the taken edge. `FINDINGS-oem-catalogue.md` §17 |
+| `ez_new_sc_ioctl` | 17 | 5 of 14 | 2 | One IRA tie, read out of `-fira-verbose=9`: `rq` and `is_null` both prefer r1 at weight 2000 and cancel in the conflict costs, so `rq`'s weight-125 preference for r2 — created because `rq` *dies* in `add r2, rq, #16`, whose destination is the hard argument register — decides. §21 |
+| `ez_strsep` | 6 | 4 of 39 | 2 | TER moves `q + 1` to its single use, so the add lands after the NUL store, and `auto_inc_dec`'s backwards scan folds the pair into `strb r3, [r4], #1`. The pointer is then in `q`'s own register, so the two `*stringp` stores are different instructions and cross-jumping cannot merge them. §18 |
 
-Three functions, all in the reconstructed OEM code, all the same size as
-shipped, and every one of them a register-allocation tie rather than anything
-semantic:
+Plus 19 bytes of `.note.gnu.build-id`, which is an SHA-1 of the three.
 
-| function | differs by | cause |
-|---|---:|---|
-| `process_config_vars` | 49 words of 86 | The register *allocation* now matches — `stm sp, {r2, r3}` at the entry, `pick` on the stack, `buf` in `sl`, twelve call-crossing allocnos and three spills, which needs `n` live across `strlen`/`memcmp` and so needs VRP not to assert `n == 0` from the loop guard. What is left is which register IRA gave each value, and one instruction's worth of guard: the shipped build tests `pos \| n` against zero with a single `orrs`, and every spelling that blocks the assertion needs a separate compare. `FINDINGS-oem-catalogue.md` §17 |
-| `ez_new_sc_ioctl` | 5 words of 14 | An IRA preference tie: `rq` and `is_null` both prefer `r1` at weight 2000 and cancel, and `rq`'s uncontested weight-125 preference for `r2` — from the `add r2, rq, #16` that sets up the third argument — decides. Unmoved by 1,625 shapes and 23 optimisation flags |
-| `ez_strsep` | 4 words of 39 | The shipped build routes the delimiter path through the shared `*stringp` store (`add r3, r4, #1`, then branch); ours fuses the NUL store into a post-increment and does its own store. §18 |
-
-All three were searched mechanically, not guessed at: about 36,000
+All three were searched mechanically, not guessed at: about 70,000
 semantically-neutral spellings through `build/oem/gen.py` and
-`build/oem/lab.py`. §10 says what was swept for each.
+`build/oem/lab.py`, and the three passes that decide each of them were read out
+of GCC 6.5.0's own source and dumps rather than inferred. §10 and §17–21 say
+what was swept and what was ruled out.
 
 ## 5. Reproducing it
 
@@ -361,30 +368,38 @@ that is what hid barrier 6 (§3.6).
 ```
 $ python3 build/fulldiff.py /path/to/8188fu.ko ./8188fu.ko --brief
    STRUCTURAL  228 bytes differ (0.012% of the shipped 1,918,056)
-   RAW         1,421 bytes differ positionally (0.07%)
-   byte-identical sections: 35/41
+   RAW         121 bytes differ positionally (0.0063%)
+   byte-identical sections: 39/41
 
 $ cmp /path/to/8188fu.ko ./8188fu.ko
 /path/to/8188fu.ko ./8188fu.ko differ: char 69, line 1
 
 $ sha256sum /path/to/8188fu.ko ./8188fu.ko
 a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  8188fu.ko   (shipped)
-31cd0c3483fc4ec8a14646970cf7dbcecee2cd96b0ef4c72a7d9a3ef6b46df1e  8188fu.ko   (ours)
+7e9df9b2fb49046db3a175a4dc8d5e334e7576212a9cb45912b5a24fbb243a85  8188fu.ko   (ours)
 ```
 
 `cmp` is **not** clean, and the numbers above are the honest statement of how
-far this got.  The first differing byte is at offset 68, inside the
+far this got. The first differing byte is at offset 68, inside the
 `.note.gnu.build-id` SHA-1 — a hash of the three functions in §4, which cannot
-match until they do.  Everything before it, including `e_shoff` and the whole
+match until they do. Everything before it, including `e_shoff` and the whole
 section header table, is right.
 
-**Read the raw number, not the structural one, when comparing two attempts.**
-`fulldiff.py`'s structural count charges a function whose size is wrong only
-its size *delta* and never looks inside it, which is what makes it
-shift-tolerant — but it therefore rates a 344-byte function that should be 340
-at 4 bytes and a 344-byte function with 176 differing bytes at 176.  An
-earlier state of this tree scored 56 structural while differing in 2,490 bytes
-of `.text`; this one scores 228 and differs in 1,002.
+**Two counts, and which to use.** `fulldiff.py`'s *structural* count matches
+symbols by name and charges a function whose size is wrong only its size
+*delta*, never looking inside it. That is what stops one moved function
+inflating the count into the hundreds of thousands — but it rates a 344-byte
+function that should be 340 at 4 bytes and a 344-byte function with 176
+differing bytes at 176. **Compare attempts by the raw number.**
+
+The same warning applies one level down and it cost this reconstruction
+1,280 bytes for a while: `build/oem/oemdiff.py` compares an *object* to the
+linked module, which cannot be done positionally, so it masks every relocated
+word and every `B`/`BL` displacement and compares those symbolically. A
+function it calls byte-identical can therefore still differ in the linked
+output — and four of them did, because they were in the wrong *place*. See
+`FINDINGS-oem-catalogue.md` §20. Always check the linked module positionally
+as well, bucketed by symbol.
 
 ## 7. Repository layout
 
@@ -403,6 +418,7 @@ build/
   fulldiff.py offsetdiff.py bytecompare.py    scoreboards
   oem/                                  the per-function iteration harness
   oem/gen.py oem/lab.py oem/specs/      the variant search
+  oem/align.py                          aligned side-by-side disassembly of one function
   oem/uidgap.py                         the DECL_UID oracle, per interval
 FINDINGS-hardware.md                    the camera and the SoC
 FINDINGS-vendor-kernel.md               barrier 2

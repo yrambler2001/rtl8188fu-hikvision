@@ -419,6 +419,8 @@ docker exec fuv sh /src/build/oem/run.sh --fn NAME -v        # per-instruction d
 docker exec fuv sh /src/build/oem/pub.sh core/rtw_mlme_ext.c OnProbeReq -v
 docker exec fuv sh /src/build/oem/dis.sh 0x92220 0x94570     # annotated shipped disassembly
 docker exec fuv sh /src/build/oem/ourdis.sh ez_sc NAME       # our object, one function
+docker exec fuv python3 /src/build/oem/align.py NAME        # the two streams, edit-distance aligned
+docker exec fuv python3 /src/build/oem/align.py NAME --obj /tmp/ours.ko   # ... against the linked module
 docker exec fuv sh /src/build/oem/asm.sh ez_sc               # our assembly, whole unit
 docker exec fuv sh /src/build/oem/dump.sh ez_sc -fdump-rtl-ira      # GCC internals
 docker exec fuv sh -c 'SRCFILE=/src/build/oem/lab/run1/x.c \
@@ -456,8 +458,23 @@ docker exec fuv sh -c 'cd /src && python3 build/oem/lab.py \
 that is right except for which registers IRA picked scores almost every word
 different, and a positional comparison of two sequences that differ by one
 inserted instruction scores everything after it different too.  `s` says how
-many instructions really differ - `ez_strsep`'s residual is `s=3`, and the
-whole search for it was "find a shape below 6".
+many instructions really differ - `ez_strsep`'s residual is `s=2`, and the
+whole search for it was "find a shape below 3".
+
+`align.py` prints the alignment that `s` counts, side by side, with the
+relocations and branch targets resolved:
+
+```
+ 300 03530020 cmpeq                            300 03530020 cmpeq
+ 304 03a07001 moveq                         <<
+ 308 13a07000 movne                         <<
+ 312 0a000003 B .+332                      r  304 0a000002 B .+320
+```
+
+`<<` and `>>` are instructions only one side has, `!!` a real substitution,
+`r` a word that differs only in its register fields.  It takes an object or the
+linked module, so it is also the way to check a function *in place* rather than
+symbolically.
 
 Results are cached by source hash (plus any extra flags, plus a scoring
 version), so re-running a sweep after adding variants only compiles the new
@@ -475,81 +492,73 @@ names. `annot.py` resolves literal-pool addends so the shipped code is readable.
 
 ## 10. Where this stands, and what is left
 
-`python3 build/fulldiff.py <shipped> ./8188fu.ko --brief`:
+`python3 build/fulldiff.py <shipped> ./8188fu.ko --brief`, and a plain
+positional byte comparison of the two files:
 
 | | bytes | share of file |
 |---|---:|---|
 | before WP-D | 28,368 | 1.479% |
 | after WP-D | 972 | 0.051% |
-| after the first residual pass | 455 structural / 433,444 raw | 0.024% |
-| **now** | **228 structural / 1,421 raw** | **0.07%** |
+| after the first residual pass | 1,421 | 0.074% |
+| after the `.text` order fix (section 20) | 141 | 0.007% |
+| **now** | **121** | **0.0063%** |
 
-| section | structural | raw | what it is |
-|---|---:|---:|---|
-| `.text` | 208 | 1,002 | content in three functions; the section is the right *length* and every symbol the right size |
-| `.note.gnu.build-id` | 20 | 20 | an SHA-1 of the module; converges last, by construction |
-| everything else | 0 | 399 | relocation addends and B/BL displacements inside those three functions |
+| section | raw bytes differing | what it is |
+|---|---:|---|
+| `.text` | 102 | content in three functions; the section is the right *length*, every symbol is at the right *address* and has the right size |
+| `.note.gnu.build-id` | 19 | an SHA-1 of the module; converges last, by construction |
+| everything else | **0** | |
 
-**35 of the 41 sections are byte-identical**, including `.strtab` *and*
-`.symtab` - all 879 `__func__.NNNN` uniquifiers match, every one of the 3,909
-function symbols has the shipped `st_size`, and the symbol order is exact with
-the suffixes rather than only without them (section 11).  **Every one of the
-38,970 relocations in the module matches.**  `.text` is exactly 975,780 bytes.
+**39 of the 41 sections are byte-identical** - `.rodata`, `.rodata.str1.1`,
+`.data`, `.bss`, `.symtab`, `.strtab`, `.modinfo`, `.comment`, all twelve
+relocation sections and all four exidx sections.  All 879 `__func__.NNNN`
+uniquifiers match, every one of the 3,909 function symbols has the shipped
+`st_size` *and the shipped `st_value`*, and every one of the 38,970
+relocations matches.  `.text` is exactly 975,780 bytes.
 
-### On the two numbers
+### Read the raw number, not the structural one
 
-`fulldiff.py`'s **structural** count is shift-tolerant: it matches symbols by
-name, and it charges a function whose size is wrong only its size *delta*,
-without looking inside it.  That is what stops one moved function inflating
-the count into the hundreds of thousands - but it means it rates a 344-byte
-function that should be 340 at 4 bytes and a 344-byte function with 176
-differing bytes at 176.  An earlier state of this tree scored **56**
-structural while differing in 2,490 bytes of `.text`; this one scores 228 and
-differs in 1,002.  **Compare attempts by the raw number**; the structural one
-is for finding *where* the difference is, not how much of it there is.
+`fulldiff.py` has two counts and they measure different things.  The
+**structural** one matches symbols by name and charges a function whose size is
+wrong only its size *delta*, so one moved function cannot inflate it into the
+hundreds of thousands - but it therefore rates a 344-byte function that should
+be 340 at 4 bytes and a 344-byte function with 176 differing bytes at 176.  The
+**raw** one is a plain positional `cmp`.  Compare attempts by the raw number.
+
+The same warning applies one level down.  `oemdiff.py` compares an *object* to
+the linked module, which cannot be done positionally, so it masks every word
+under a relocation and every `B`/`BL` displacement and compares those
+symbolically.  That is what makes it usable at all - but it means a function it
+calls byte-identical can still differ in the linked output, and for four
+functions it did: see section 20.  When `run.sh` says 46/46, check the linked
+module too.
 
 ### Closed during this pass
 
 | | was | now | how |
 |---|---|---|---|
-| `ez_scan_device_ioctl_handle` | +4 bytes, one extra pool word, ~192 bytes of `.rel.text` | **byte-identical** | there is no `goto trig_scan`: the shared tail is written out in both TRIG arms and cross-jumping merges it.  Sections 16 and 19 |
-| `process_config_vars` | +8 bytes, 84 differing words | right size, **49** words, and the shipped register allocation | an if-chain rather than a `switch`, `pos = 0` per path, `pos` a different tree type from `n`, `n = pos` in the comment case, and a guard of `(pos \| n) == 1` that blocks VRP's assertion.  Sections 15, 17, 19 |
-| `ez_strsep` | 156 bytes, 26 words | right size, **4** words | the escape test is two `if`s with a duplicated `memmove`, and the walk carries the read position and advances at the end of each path.  Sections 18 and 19 |
-| OEM source order | `ez_probe_req_handler` mid-file | just before `ez_scan_device_ioctl_handle` | the only interval the DECL_UID oracle scored *negative*; the move also cut `.symtab`'s raw difference from 7,482 to 3,312 bytes |
-| `ez_read_rssi_per_ant_ioctl` | had `precvpriv` | uses `padapter->recvpriv.rssi` | one declaration too many for the oracle, and byte-neutral either way |
-| the 16 uniquifiers | 863/879 | **879/879**, `.strtab` byte-identical | section 11 |
-| all relocations | 312 bytes of `.rel.text` | **0** | a consequence of the first two |
-
-Everything was searched mechanically rather than by hand: `build/oem/gen.py`
-expands a spec's orthogonal axes into whole translation units and
-`build/oem/lab.py` compiles and scores them ten at a time, about thirty a
-second.  Roughly 36,000 variants went through it in this pass.  Two scores
-matter and they disagree often: `d`, the size delta, and `s`, the Levenshtein
-distance of the instruction sequences with the register fields blanked out.
-`s` is the one that says whether a shape is right, because a wholesale
-register renaming makes almost every word differ while changing nothing
-structural.
+| `.text` order of the four probe / EID208 handlers | 873 bytes in `.text`, 208 in `.rodata.str1.1`, 161 in `.rel.text`, 13 in `.ARM.exidx`, 17 in `.symtab` | **0** | `ez_probe_req_handler` belongs *before* `check_probe_sync_eid208` in the source.  Section 20 |
+| `process_config_vars` | 98 bytes, edit distance 12 | 79 bytes, edit distance 5 | the guard is `(pos \| n) \| (pos & n)`, the `n` test's arms write `pos = n`, and `end` is declared before `j`.  Section 17 |
 
 ### The three that remain
 
-**43 of the 46 OEM functions are byte-identical** (`build/oem/run.sh`), and so
-are all four public functions the OEM patch distorts.  All three that remain
-are the *right size*; what differs is which register the allocator picked.
+**43 of the 46 OEM functions are byte-identical**, and so are all four public
+functions the OEM patch distorts.  All three that remain are the *right size*
+and at the right address; what differs is which register the allocator picked.
 
 | function | differs by | what is known |
 |---|---:|---|
-| `process_config_vars` | 49 words of 86 | The register **allocation** now matches: `stm sp, {r2, r3}` at the entry, `pick` on the stack, `buf` in `sl`, twelve call-crossing allocnos and three spills.  That needed `n` live across `strlen`/`memcmp`, which needed VRP's `register_edge_assert_for` not to assert `n == 0` from the loop guard, which the guard `(pos \| n) == 1` achieves (section 17).  What is left is which register IRA gave each value, and one instruction's worth of guard: the shipped build tests against zero with a single `orrs`, and every spelling that blocks the assertion needs a separate compare. |
-| `ez_new_sc_ioctl` | 5 words of 14 | Same seven instructions, two registers swapped.  An IRA preference tie: `rq` and `is_null` both prefer r1 at weight 2000 and cancel, and `rq`'s uncontested weight-125 preference for r2 - from the `add r2, rq, #16` that sets up the third argument - decides.  Unchanged by 1,625 shapes and 23 optimisation flags. |
-| `ez_strsep` | 4 words of 39 | The shipped build routes the delimiter path through the shared `*stringp` store - `add r3, r4, #1` and a branch to the block the end-of-string path also uses - where ours fuses the NUL store into a post-increment (`strb r3, [r4], #1`) and does its own store.  Same instruction count.  Section 18. |
+| `process_config_vars` | 79 bytes, 44 words, edit distance 5 | Two mechanisms, both named exactly.  The guard temp is coalesced into pos's partition, because `uncprop` rewrites all seven main-path `pos = 0` PHI arguments into it and out-of-SSA's coalesce costs *accumulate per edge*, so seven beats pos's own two - that costs a `b`, a `mov` and a latch `mov`.  And the shipped build materialises `m` with a dead `moveq #1` / `movne #0` pair where ours branches straight to the shared `m = 1`.  Section 17 |
+| `ez_new_sc_ioctl` | 17 bytes, 5 words, edit distance 2 | One IRA decision, read out of `-fira-verbose=9`: `rq` and `is_null` both prefer r1 at weight 2000 and cancel in `assign_hard_reg`'s conflict costs, so `rq`'s weight-125 preference for r2 - created by `process_reg_shuffles` because `rq` *dies* in `add r2, rq, #16`, whose destination is the hard argument register - decides.  Section 21 |
+| `ez_strsep` | 6 bytes, 4 words, edit distance 2 | TER moves `q + 1` to its single use, so the add lands *after* the NUL store, and `auto_inc_dec`'s reverse scan then folds the pair into `strb r3, [r4], #1`; the pointer is left in `q`'s own register and the two `*stringp` stores are no longer the same instruction, so cross-jumping cannot merge them.  Section 18 |
 
 ### Next steps, in the order worth doing them
 
-1. `process_config_vars` is the largest of the three and the closest to a
-   named cause: find a spelling of the loop guard that both blocks VRP's
-   assertion and still compares against zero, so the `orr` and the `cmp`
-   fuse back into one `orrs`.  Section 17 lists what has been ruled out.
-2. `ez_strsep` needs the delimiter path to reuse the shared `*stringp` store;
-   the four shapes that produce a shared store all cost more elsewhere.
+1. `process_config_vars`: stop `uncprop` rewriting pos's zeros without also
+   letting the guard-true arms merge into the shared `mov r2, #0`.  The two
+   are coupled - section 17 says how.
+2. `ez_strsep` needs `q + 1` to have two uses, or to be in a different block
+   from `*q = 0`, so TER leaves it where the source put it.
 3. `ez_new_sc_ioctl` is two registers and the most stubborn of the three.
 4. `.note.gnu.build-id` will match by itself when the rest does.
 
@@ -918,39 +927,30 @@ tail out in both TRIG arms instead of jumping to it, which puts the two
 
 ---
 
-## 17. `process_config_vars`: the twelfth allocno is `n`
+## 17. `process_config_vars`: the guard, the arms, and what is left
 
-Ours is 352 bytes to the shipped 344: two extra instructions, a `mov r5,r1` /
-`mov r1,r5` pair on the loop back edge.
-
-Read off the shipped disassembly, the register roles are
+Ours is 344 bytes to the shipped 344 and 79 of them differ.  Read off the
+shipped disassembly, the register roles are
 
 ```
 	sl = buf   r8 = i   r5 = j   r2 = pos   r6 = n   r4 = end   r7 = m
-	r9 = pos|n   fp = strlen(var)      stack: pick, var, len
+	r9 = pos|n   fp = strlen(var)      stack: pick, var, len, &buf[i]
 ```
 
-and the crucial one is `r6`.  `n` is in a callee-saved register and the
-switch's default case - the one with the `strlen` and `memcmp` calls - never
-writes it: its value simply survives to the next iteration.  IRA therefore has
-twelve allocnos that cross the calls, spills the three cheapest (`pick`, `var`,
-`len`), and everything else fits.
+and three separate GCC decisions have to come out right.
 
-Ours rematerialises `n = 0` after the calls instead, so `n` never crosses them,
-IRA has eleven, spills two, keeps `pick` in `sl` - and to fit `pos` splits it
-across two registers, which is the two extra copies.
+### 1. `n` has to stay live across the two calls
 
-Why ours can rematerialise is in the GIMPLE.  At `.094t.mergephi2` the loop
-PHI still reads
+`n` is in a callee-saved register and the default case - the one with the
+`strlen` and `memcmp` calls - never writes it: its value simply survives to the
+next iteration.  IRA therefore has twelve allocnos that cross the calls, spills
+the three cheapest (`pick`, `var`, `len`), and everything else fits.  If `n` is
+instead rematerialised as 0 after the calls IRA has eleven, spills two, keeps
+`pick` in `sl`, and splits `pos` across two registers.
 
-```
-  # n_8 = PHI <n_9(4), 0(7), _28(11), _28(12), 1(10), n_9(25), n_9(24), ...>
-```
-
-- `n_9`, unchanged, on the default-case edges, exactly what the shipped build
-keeps.  `vrp1` turns those into `0`.  The assertion comes from GCC 6's
-`register_edge_assert_for`, which for `if ((a | b) != 0)` taking its false edge
-asserts `a == 0` and `b == 0` with no `has_single_use` guard on that path:
+Whether `n` survives is decided by VRP.  GCC 6's `register_edge_assert_for`,
+for `if (X != 0)` on the edge where `X == 0`, recurses into `X`'s defining
+`BIT_IOR_EXPR` and asserts *both* operands zero:
 
 ```c
   if (((comp_code == EQ_EXPR && integer_zerop (val))
@@ -959,37 +959,134 @@ asserts `a == 0` and `b == 0` with no `has_single_use` guard on that path:
           register_edge_assert_for_1 (op1, EQ_EXPR, e, si); }
 ```
 
-and the guard *is* an `IOR` by then: the C front end folds `n || pos` into
-`(n | pos) != 0` long before `ifcombine` runs.  Writing the guard as `n | pos`,
-`(n | pos) != 0`, `n != 0 || pos != 0` or `!!n | !!pos` all reach `vrp1` the
-same way, and all fold `n`.
+so a plain `if (pos | n)` proves `n == 0` on the whole main path, the loop PHI's
+`n_9` arguments become the constant 0, and `n` is dead across the calls.
 
-Swept: 2,592 structural shapes (guard spelling, both `|=` in the switch, where
-`pos = 0` sits, `for` vs `while`, declaration order), 16,807 type combinations
-over six locals and seven spellings of a 32-bit integer, 3,360 crossing the
-two, 288 where the guard value is given a name of its own and assigned
-explicitly where the shipped code uses `r9`, 48 over `switch` versus if-chain,
-1,024 over the if-chain against the type cross product, 4,608 over the guard
-and the two `|=`, 1,728 over the inside of the default arm, and about 400 over
-guard forms chosen to defeat the assertion.  Three of those helped and are in
-the tree: the if-chain, `pos = 0` per path, and `pos` having a different tree
-type from `n`.  Edit distance 21 -> 12 of 86.
+The recursion *one level down*, inside `register_edge_assert_for_1`, is gated
+on `has_single_use`:
 
-**The assertion can be defeated.**  `register_edge_assert_for` recurses into an
-`IOR`'s operands only when the comparison is `== 0` (or `!= 1` on a
-one-bit type).  Writing the guard as `(pos | n) > 0` or `(pos | n) == 1` -
-both equivalent here, since the two flags only ever hold 0 or 1 - leaves
-`n` un-asserted, and the register allocation then *is* the shipped one:
-`stm sp, {r2, r3}` at the entry, `pick` on the stack, `buf` in `sl`, twelve
-call-crossing allocnos.  It costs one instruction, because GCC then emits
-`orr` plus `cmp #1` where the shipped code has a single `orrs`, and the extra
-content it brings costs more than the eight bytes it saves (164 whole-file
-bytes against 56).  So the narrowest remaining question is precise: what
-spelling blocks the assertion *and* still compares against zero.
+```c
+      if (TREE_CODE (op0) == SSA_NAME && has_single_use (op0))
+	register_edge_assert_for_1 (op0, code, e, bsi);
+```
+
+`pos` and `n` never have a single use - each is read by the guard, by the
+`n` test inside it, and by the loop PHI - so writing the guard as a *nested*
+IOR whose two operands are single-use temporaries blocks the whole thing:
+
+```c
+	if ((pos | n) | (pos & n)) {
+```
+
+`pos & n` is always zero here (the two flags are never both set), so the value
+is unchanged; `combine` folds `(a | b) | (a & b)` back to `a | b`, so the RTL is
+still one `orrs` compared against zero.  That last part matters twice over,
+because it is what lets `cse1` replace `mov rX, #0` on the main path with
+`mov rX, r9` - the shipped `moveq r6, r4`, `moveq r4, r9`, `movne r4, r9`.
+
+This is a value-preserving rewrite chosen because it is the only spelling found
+that does both.  The vendor's own spelling is not recoverable from the binary;
+what *is* recoverable is that their guard was a single `orrs`/`beq` and that
+their `n` survived the calls, and this reproduces both.  Ruled out, all
+compiled and scored: `(pos | n) == 1` and `(pos | n) > 0` (block the assertion
+but need a separate `cmp`); `(int)(pos | n)`, `(s32)(pos | n)`, `(u32)(...)`
+and a temporary of another type (the truth-value conversion in
+`c_common_truthvalue_conversion` strips a widening `NOP_EXPR`, and TER folds
+the temporary into the compare); `(pos | n) & 1`, `& 3`, `& 0xff`,
+`pos | (n & 1)`, `% 2`, `<< 0`, `>> 0`, `* 1`, `/ 1`, `+ 0`, `- 0`, `^ 0`,
+`!!(pos | n)`, `pos || n`, `n || pos` (VRP's own
+`simplify_bit_ops_using_ranges` removes the mask in vrp1 and vrp2 then sees
+the bare IOR).
+
+### 2. The `n` test's arms must not merge into the shared `pos = 0`
+
+The shipped guard-true block is
+
+```
+	cmp r6, #0 ; moveq r2, r6 ; moveq r4, r6 ; movne r6, #0 ; movne r2, r6 ; b NEXT
+```
+
+- both arms clear `pos` *themselves* and branch past the shared `mov r2, #0`.
+Writing them as `pos = 0` makes the copies constants, identical to the shared
+tail, and cross-jumping merges them.  Writing them as `pos = n` - which is the
+same value, because on both arms `n` is the zero - makes them SSA copies, and
+an SSA copy is not a constant:
+
+```c
+		if (buf[i] == '\n') {
+			if (n) {
+				n = 0;
+				pos = n;
+			} else {
+				pos = n;
+				end = 0;
+			}
+		}
+```
+
+### 3. Declaration order is PHI order is copy order
+
+Out-of-SSA emits one copy per PHI on each incoming edge, in the order the PHIs
+sit in the block, and `into_ssa` creates those PHIs in the order the locals are
+declared.  That decides which copy is *last* in each arm, and therefore what
+cross-jumping can merge.  A 4,320-variant sweep over all 720 declaration
+orders crossed with the guard and the arms puts `end` before `j`; it is worth
+four words.
+
+### What is left: five instructions
+
+```
+  shipped                          ours
+  ...
+  cmp r7, #32 ; cmpeq r3, #32      cmp r2, #32 ; cmpeq r3, #32
+  moveq r7, #1                     -
+  movne r7, #0                     -
+  beq ZERO_POS                     beq M_ONE
+  ...
+  mov r7, #1     (m = 1)           mov r9, #1
+  -                                b   NEXT
+  mov r2, #0     (ZERO_POS)        mov r6, r2
+  add r8, r8, #1 (NEXT)            add r7, r7, #1
+  -                                mov r2, r6
+  b   loop                         b   loop
+```
+
+**The three-instruction group is the guard temp coalescing into pos.**
+`uncprop` rewrites a PHI argument that is the constant 0 into any SSA name
+known to be 0 on that edge, and on the main path that name is the guard temp;
+it does so for all seven `pos = 0` edges.  Out-of-SSA's coalesce costs then
+*accumulate per edge* (`add_coalesce` adds, it does not max), so the guard
+temp's seven beats `pos_6`'s two, the `orr` writes pos's own register, and pos
+needs a second register plus a copy on the latch.
+
+The obvious fix - give the guard value a type whose `TYPE_CANONICAL` differs
+from pos's, so `gimple_can_coalesce_p` refuses - works: with
+`((int)(pos | n)) | ((int)(pos & n))` and `pos` unsigned the PHI keeps its
+constants, `end` and `m` pick the temp up exactly as the shipped build does,
+and the latch copy disappears.  But it *also* re-creates a shared
+`mov r2, #0` block for the main path, which the guard-true arms then merge
+into, and the net is worse (edit distance 8 against 5).  The two effects are
+coupled through the same block and that is the open question.
+
+Swept, all compiled and scored against the shipped bytes: 2,592 structural
+shapes; 16,807 type combinations over six locals; 5,184 more crossing the
+types with three guards; 4,320 over all 720 declaration orders; 11,520 over
+declaration order crossed with the arms, the `#` arm and the `\n` arm; and
+about 8,000 over guard spellings.  Edit distance 21 -> 12 -> 5.
+
+**The two-instruction group is `m`.**  The shipped build materialises
+`m = (pick[j-1] == ' ' && buf[i] == ' ')` as 0/1 with a conditional-move pair
+and then branches on the same flags; the `movne r7, #0` is dead, because every
+path from it reaches `m = 1`.  Ours branches straight to the shared `m = 1`,
+because VRP asserts `m != 0` on the taken edge, `m`'s range is [0,1], so the
+value is 1 and `phiopt` merges it with the other `1` arguments.  Nothing that
+keeps the semantics gives `m` a range VRP cannot pin: seven spellings of the
+test and the assignment, three types for `m`, and the `switch`/if-chain axis
+all produce the branch.
 
 ---
 
-## 18. `ez_strsep`: the escape test, and the last copy
+## 18. `ez_strsep`: TER puts the add on the wrong side of the store
 
 Two things were wrong; one is now right.
 
@@ -997,38 +1094,61 @@ Two things were wrong; one is now right.
 `if`s, each with its own `memmove(q, p, strlen(q)); continue;`, reproduces the
 shipped block order exactly.  Cross-jumping merges the two copies again and
 keeps the *earlier* one, which is what puts the `*p == delim` test after the
-memmove block (section 12).  That takes the function from six instruction-level
-differences to three.
+memmove block (section 12).
 
-It costs four bytes of `st_size`, and it is still the better trade end to end:
-the whole-file scoreboard goes 455 -> 348, because `.text` content falls from
-100 bytes to 20 and `.rel.text` from 312 to 280 against `.symtab` rising from 8
-to 12.  A resized function costs the scoreboard only its size delta; a
-same-size function with different content costs every differing byte.
-
-**The last copy** is out-of-SSA.  `q = p` is copy-propagated away, so the loop
-PHI *is* `q`, and the walk becomes
+**The last four words** are the delimiter path's `*stringp` store:
 
 ```
-  p_10 = p_1 + 1;
-  c_11 = MEM[base: p_10, offset: -1];
+	shipped                        ours
+ 140	mov  r2, #0                    mov  r3, #0
+ 144	add  r3, r4, #1                strb r3, [r4], #1
+ 148	strb r2, [r4]                  str  r4, [r7]
+ 152	b    .+64  -> str r3, [r7]     b    .+68  -> mov r0, r6
 ```
 
-The ARM post-increment forces `p_1` and `p_10` into one register, so whichever
-of the two the PHI is coalesced with keeps its register and the other needs a
-copy.  The shipped build coalesces `p + 1` - `mov r4, r5 / ldrb r3, [r5], #1`,
-nothing on the back edge - and copies the old pointer out for the later uses.
-Ours coalesces `q` and pays `mov r5, r4` to close the loop.  It also reuses
-`p_10` where the shipped build recomputes `add r3, r4, #1` for `q + 1`, which
-says the two are not the same SSA name there.
+The shipped delimiter path branches to the *same* `str r3, [r7]` the
+end-of-string path uses.  `*stringp = NULL` became `str r3, [r7]` because
+`cse1` knows r3 - the character just loaded and compared against zero - is zero
+on that edge, and the delimiter path puts `q + 1` in the same r3 and
+cross-jumps onto it.  That is only possible because the address is computed
+*before* the NUL store, so `q` is still live at the store and cannot share a
+register with `q + 1`.
 
-Swept: 2,520 shapes over loop form, declaration order, `c`'s type and the
-escape test; 300 over the pointer types (`char *` and `u8 *` are not
-interchangeable to `gimple_can_coalesce_p`, section 15, and it makes no
-difference here because the cast is a useless conversion and `q` disappears
-anyway); 486 over which of the two pointers each use is written in terms of;
-and 16 genuinely different loop carriers - carry `p`, carry `q`, no `q` at all,
-an index, a `while` head.  All of them score exactly 3.
+Ours computes it after, and then it fuses.  The chain, all three passes
+confirmed in their own dumps:
+
+1. **TER** (`tree-ssa-ter.c`, run inside `expand`) replaces an expression into
+   its use when `ssa_is_replaceable_p` holds - which requires, among other
+   things, `single_imm_use`.  `t = q + 1` is used once, by `*stringp = t`, so
+   the add is emitted at the store no matter which order the source writes
+   them in: `-fdump-rtl-expand` shows insn 76 `mem(p_110) = 0` then insn 77
+   `t_129 = p_110 + 1`.
+2. **`auto_inc_dec`** scans each block *backwards* (`merge_in_block`), keeping
+   `reg_next_inc_use[reg]`, and `find_inc` looks only for an inc that comes
+   *after* the memory reference.  With the add after the store it finds it,
+   `try_merge` prices the pair at 8 against 8 - `old_cost < new_cost` is false
+   on a tie, so it fires - and `-fdump-rtl-auto_inc_dec-details` prints
+   `found post add(77)`, `****success 76: [r129:SI++]=r127`.
+3. The value is then in `q`'s own register, so the two `*stringp` stores are
+   `str r4, [r7]` and `str r3, [r7]`, and cross-jumping cannot merge them.
+
+Turning the pass off (`-fno-auto-inc-dec`, a control only - the vendor's flags
+are fixed) gives `add r4, r4, #1 ; strb r3, [r4, #-1]`, i.e. the right order
+but the wrong registers, and costs two instructions in the loop, where the
+same pass produces the shipped `ldrb r3, [r5], #1`.
+
+So the open question is narrow: a spelling in which `q + 1` has **two** uses,
+or lives in a different basic block from `*q = '\0'`, so TER leaves it where
+the source put it.  Ruled out, all compiled and scored: the store order both
+ways; a named temporary; `p = q + 1` before or after; `*q++ = '\0'`;
+`*stringp = ++q`; `q += 1`; `&q[1]`; `q + sizeof(char)`; a cast through
+`unsigned long`; `(*stringp)++`; carrying the walk pointer four different ways;
+`char` and `u8` for the character; `for(;;)` and `while(1)`; and - the two that
+do block TER - advancing `p` before the delimiter test (which removes the add
+entirely, because the value is then the loop's own `p`) and breaking out to a
+single `*stringp = r` after the loop (which puts the epilogue at the end of the
+function instead of at offset 64, because the shared tail has to be *duplicated*
+source for cross-jumping to keep the earlier copy - section 19).
 
 ---
 
@@ -1079,3 +1199,147 @@ from 21 to 12 and the whole file 96 -> 56.
 The practical rule for reading shipped code: **a `goto` in a reconstruction is
 a hypothesis, not an observation.**  Try the duplicated form as well - it costs
 one variant.
+
+---
+
+## 20. `.text` order is the call graph, not the source - and `oemdiff` hid it
+
+This was 873 of the 1,002 differing bytes of `.text` plus every byte outside
+it, and the per-function harness reported all four functions involved as
+byte-identical.
+
+`oemdiff.py` compares an *object* to the linked module.  It cannot do that
+positionally, so it masks every word that carries a relocation and every
+`B`/`BL` displacement and compares those symbolically instead - target symbol,
+addend, resolved callee.  That is what makes it usable, and it is also how four
+functions that were in the wrong *place* passed as clean: their content is
+identical, so every symbolic comparison matched, while in the linked module
+they sat at different addresses.
+
+A plain `cmp` of the two modules, bucketed by symbol, is the check that finds
+it:
+
+```
+   378  ez_probe_requst_eid208_handler
+   247  ez_probe_response_eid208_handler
+   143  check_probe_sync_eid208
+   105  ez_probe_req_handler
+```
+
+Laying the two symbol tables side by side shows a rotation:
+
+```
+   shipped   ... check_sn_valid  check_probe_sync_EID  ez_probe_req_handler
+                 check_probe_sync_eid208  response  requst  ez_scan_device_ioctl_handle
+   ours      ... check_sn_valid  check_probe_sync_EID
+                 check_probe_sync_eid208  response  requst  ez_probe_req_handler  ez_scan...
+```
+
+### Why the order is what it is
+
+GCC emits functions in the reverse of `ipa_reverse_postorder`, a depth-first
+walk of the call graph over *callers*.  The practical consequence is visible in
+both modules: `check_probe_sync_EID` is defined at line 48 of `ez_sc.c` but
+emitted near the end, immediately before `ez_probe_req_handler` - the function
+that calls it - and it drags `check_sn_valid`, which *it* calls, along in front
+of it.  So the position of one root function in the source decides where a
+whole chain lands in `.text`.
+
+`ez_probe_req_handler` had been placed immediately before
+`ez_scan_device_ioctl_handle` by the DECL_UID oracle (section 11).  That
+placement satisfies the uniquifiers but puts the chain after the three EID208
+handlers.  Compiling the same file with the function spliced in at each of the
+26 top-level positions in turn and reading `nm -n` off each object shows that
+**any** position before `check_probe_sync_eid208` reproduces the shipped order,
+and every position after it does not:
+
+```
+   00..19  ... check_sn_valid check_probe_sync_EID ez_probe_req_handler
+               check_probe_sync_eid208 response requst ez_scan_device_ioctl_handle   <- shipped
+   20..21  ... check_probe_sync_eid208 ez_probe_req_handler response requst ...
+   24..25  ... response requst ez_probe_req_handler ez_scan_device_ioctl_handle      <- was
+```
+
+### Which of those twenty the oracle picks
+
+Moving the function moves its eight DECL_UIDs (`2 + max(nparams,1)` for the
+definition, plus four locals) from the
+`ez_probe_requst_eid208_handler -> ez_scan_device_ioctl_handle` interval into
+whichever interval it lands in, and each interval's total is pinned exactly.
+Only one interval has a placeholder big enough to give eight back:
+`check_probe_sync_EID -> rtw_ezviz_ie_set`, whose `ez_sc_uid_gap_1` was ten.
+So the function goes immediately after `check_probe_sync_EID` - the function it
+calls - `ez_sc_uid_gap_1` shrinks from ten declarations to two, and
+`ez_sc_uid_gap_7` grows from 27 to 35.  All eight intervals are exact and all
+879 uniquifiers still match.
+
+Moving `check_sn_valid` instead was tried and rejected: it is reachable only
+through `check_probe_sync_EID`, so `.text` does not move, but it changes which
+`.LANCHOR` offsets `check_sn_valid` uses for `DeviceInfo` and `null_sn` and the
+function stops matching.
+
+### The result
+
+| | before | after |
+|---|---:|---:|
+| `.text` | 1,002 | 102 |
+| `.rodata.str1.1` | 208 | 0 |
+| `.rel.text` | 161 | 0 |
+| `.ARM.exidx` | 13 | 0 |
+| `.symtab` | 17 | 0 |
+| whole file | 1,421 | 141, then 121 |
+| byte-identical sections | 35/41 | 39/41 |
+
+`.rodata.str1.1` moved because string constants are emitted in the order the
+functions that use them are emitted; `.rel.text`, `.ARM.exidx` and `.symtab`
+because they are indexed by address.
+
+**The rule:** a per-function harness that compares symbolically cannot see a
+placement error.  Check the linked module positionally as well, bucketed by
+symbol - `build/oem/align.py` and a bare `cmp` are enough.
+
+---
+
+## 21. `ez_new_sc_ioctl`: the IRA numbers, printed
+
+Five words of fourteen, and the whole difference is which of two allocnos gets
+r1.  `-fira-verbose=9` (10 sends the same text to stderr instead of the dump
+file) prints the entire state of this function:
+
+```
+  a0(r124,l0) costs: GENERAL_REGS:0 MEM:20000
+  a1(r116,l0) costs: GENERAL_REGS:0 MEM:30000
+;; a0(r124,l0) conflicts: a1(r116,l0)
+;;     total conflict hard regs: 0 2
+;; a1(r116,l0) conflicts: a0(r124,l0)
+;;     total conflict hard regs: 0
+  pref0:a0(r124)<-hr1@2000
+  pref1:a1(r116)<-hr1@2000
+  pref2:a1(r116)<-hr2@125
+      Popping a1(r116,l0)  -- assign reg 2
+      Popping a0(r124,l0)  -- assign reg 1
+```
+
+r116 is `rq` (insn 12 is `r116 = r1`, the incoming parameter) and r124 is
+`is_null` (insn 30 is `r1 = r124`, the second outgoing argument).  Both want
+r1 at 2000; they conflict, so in `assign_hard_reg` the neighbour's preference
+is subtracted from the full cost and the two cancel exactly.  What is left is
+`rq`'s weight-125 preference for r2, which comes from `ira-conflicts.c`'s
+`process_reg_shuffles`: `rq` *dies* in insn 29, `r2 = r116 + 16`, whose
+destination is the hard argument register, so IRA records a copy between them.
+r2 therefore wins by 125 and `rq` moves there, costing `mov r2, r1` at the top.
+
+The shipped build does the opposite - `rq` stays in r1, `is_null` goes to r3,
+and the second argument is set up with `mov r1, r3` after `add r2, r1, #16`.
+Both are eight instructions; only the assignment differs.
+
+To flip it, either `rq` must not die in that add (nothing in the source keeps
+it live: the address is its last use and the call is a sibcall) or `is_null`
+must want r1 less.  Swept and unmoved: five spellings of the third argument
+(`&wrq->u.data`, `&((struct iwreq *)rq)->u.data`, `&(wrq->u).data`, a named
+`struct iw_point *`, `(struct iw_point *)((char *)rq + 16)`); seven types for
+the flag; four spellings of the null test; guard clause, `if`/`else`, a `ret`
+variable, `goto`; passing a literal `0` as the second argument instead of the
+flag (identical code); computing the address before and after the branch; a
+`static` helper for the test; and `unlikely()` / `__builtin_expect` on the
+branch, which does not move the block frequencies enough to change the tie.
