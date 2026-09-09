@@ -8,7 +8,7 @@ SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
 
 * `build/fulldiff.py <shipped> <rebuilt> [--brief]` — whole-file scoreboard:
   every section, the symbol table, the relocations and the string tables.
-  Current: **121 bytes still differ positionally (0.0063% of the file)**, 228
+  Current: **121 bytes still differ positionally (0.0063% of the file)**, 203
   by the shift-tolerant "structural" count; 39 of the 41 sections are
   byte-identical.  *Compare attempts by the raw number:* the structural count
   charges a function whose size is wrong only its size delta and never looks

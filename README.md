@@ -6,7 +6,7 @@ two OEM translation units that are in no public Realtek release.
 
 **Current state: 121 of 1,918,056 bytes differ — 0.0063% of the file**
 (a plain positional `cmp`; the shift-tolerant "structural" count in
-`fulldiff.py` says 228, and §6 explains why the two disagree).
+`fulldiff.py` says 203, and §6 explains why the two disagree).
 
 **39 of the 41 sections are byte-identical**, including `.rodata`,
 `.rodata.str1.1`, `.data`, `.bss`, `.symtab`, `.strtab`, `.modinfo`,
@@ -367,7 +367,7 @@ that is what hid barrier 6 (§3.6).
 
 ```
 $ python3 build/fulldiff.py /path/to/8188fu.ko ./8188fu.ko --brief
-   STRUCTURAL  228 bytes differ (0.012% of the shipped 1,918,056)
+   STRUCTURAL  203 bytes differ (0.011% of the shipped 1,918,056)
    RAW         121 bytes differ positionally (0.0063%)
    byte-identical sections: 39/41
 
