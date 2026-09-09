@@ -45,6 +45,11 @@ cd .. && docker run --rm --platform linux/arm64 -v "$PWD":/src -w /src \
 build/compare.sh /path/to/original/8188fu.ko
 ```
 
+That is the quick path, against a kernel.org 4.9.129. The build that produces the numbers
+below uses the Fullhan vendor kernel (`build/Dockerfile.vendor`), the vendor's own build
+path and timestamp (`build/build-vendorpath.sh`), and a GCC 6.5.0 rebuilt with the vendor's
+`--with-pkgversion` (`build/build-gcc-vendor.sh`, one command, ~13 min).
+
 ## Result
 
 Byte-exact for the whole module is not reachable (see below), but with the
@@ -60,11 +65,13 @@ Byte-exact for the whole module is not reachable (see below), but with the
 | function symbols we build that the shipped module lacks | **0** |
 | same-size functions | **3886** |
 | **byte-identical functions** | **3882 = 98.6% of the module, 97.3% of `.text`** |
-| module size | 1,890,468 vs 1,918,056 shipped (−1.4%, all OEM code) |
+| module size | 1,894,584 vs 1,918,056 shipped (−1.2%, all OEM code) |
+| **whole file** | **28,368 of 1,918,056 bytes still differ (1.48%)** — see `FINDINGS-byte-gap.md` |
+| `.comment` | our 157 `.ident` copies are a **byte-exact prefix** of the shipped 159 |
 
 Those figures are against the **Fullhan vendor kernel** (`build/Dockerfile.vendor`,
 `FINDINGS-vendor-kernel.md`) with the recovered driver configuration
-(`FINDINGS-driver-config.md`). Against a stock kernel.org 4.9.129 the same source gave
+(`FINDINGS-driver-config.md`) and the rebuilt compiler (`FINDINGS-toolchain.md`). Against a stock kernel.org 4.9.129 the same source gave
 3817 symbols / 3038 same-size / 2181 byte-identical (55.4%); with the vendor kernel but
 the wrong driver `#ifdef`s, 2570 (65.2%).
 
@@ -85,8 +92,11 @@ The toolchain came from kernel.org's crosstool prebuilts:
 rather than an approximation:
 
 * `arm_multilib_uclibc_20200924` is only GCC's `--with-pkgversion=` string. It
-  lands in `.comment` and affects nothing else. The compiler underneath is
-  stock GCC 6.5.0.
+  lands in `.comment` and affects nothing else — now proven, not assumed:
+  `build/build-gcc-vendor.sh` rebuilds GCC 6.5.0 with the crosstool prebuilt's
+  own configure options plus that string, and all 158 object files it produces
+  are byte-identical to the stock compiler's once `.comment` is removed
+  (`FINDINGS-toolchain.md`). The compiler underneath is stock GCC 6.5.0.
 * `nolibc` is correct. Kernel modules are freestanding — they never link libc,
   so the uclibc/glibc distinction cannot reach codegen.
 

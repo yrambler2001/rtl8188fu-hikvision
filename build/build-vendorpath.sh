@@ -19,6 +19,15 @@
 #             SOURCE_DATE_EPOCH support (verified: it ignores the variable), so
 #             the values are pinned with -D and -Wno-builtin-macro-redefined.
 #
+#   .comment  A third leak is a whole section rather than a string.  GCC stamps
+#             one .ident per object file, and its text is the --with-pkgversion
+#             the compiler itself was configured with.  So this defaults to the
+#             GCC 6.5.0 rebuilt by build/build-gcc-vendor.sh, which carries the
+#             vendor's 'arm_multilib_uclibc_20200924'.  Point TOOLCHAIN_BIN at
+#             /opt/gcc-6.5.0-nolibc/arm-linux-gnueabi/bin for a control build
+#             with the stock kernel.org crosstool; they are otherwise the same
+#             compiler, and produce identical code.
+#
 # usage: docker exec fuv sh /src/build/build-vendorpath.sh [make args]
 set -e
 
@@ -28,9 +37,18 @@ VENDOR_ROOT=${VENDOR_ROOT:-/data1/jiangqifeng6/work/tongyibianyi/develop_branch/
 : "${BUILD_DATE:=Dec 25 2023}"
 : "${BUILD_TIME:=20:43:27}"
 
+: "${TOOLCHAIN_BIN:=/opt/gcc-6.5.0-vendor/arm-linux-gnueabi/bin}"
+if [ -x "$TOOLCHAIN_BIN/arm-linux-gnueabi-gcc" ]; then
+    PATH="$TOOLCHAIN_BIN:$PATH"
+    export PATH
+else
+    echo "!! no compiler at $TOOLCHAIN_BIN; falling back to PATH" >&2
+fi
+
 echo "=== source   $SRC"
 echo "=== build in $VENDOR_ROOT"
 echo "=== kernel   $KSRC"
+echo "=== cc       $(arm-linux-gnueabi-gcc --version | head -1)"
 
 rm -rf "$VENDOR_ROOT"
 mkdir -p "$VENDOR_ROOT"

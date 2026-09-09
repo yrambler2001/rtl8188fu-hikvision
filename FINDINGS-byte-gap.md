@@ -314,6 +314,11 @@ is present. There is no code difference. Nobody should investigate this again.
 * `.comment` (9,347 bytes, 25% of the remaining gap) needs a GCC 6.5.0 built with
   `--with-pkgversion='arm_multilib_uclibc_20200924'`. Nothing short of that reproduces the
   string honestly; `objcopy --update-section` would fake it.
+  **Closed since — see `FINDINGS-toolchain.md`.** That GCC was built, `.comment` fell to 84
+  bytes (the two OEM object files, and our section is now a byte-exact prefix of the shipped
+  one), the whole-file total went 37,630 -> 28,368, and codegen was verified unchanged: all
+  158 object files byte-identical to the stock compiler's with `.comment` removed. Every
+  other number in this note still stands as written.
 * `_rtw_skb_alloc` (4.1) - two hypotheses, no evidence that separates them.
 * `rtw_efuse_analyze` (4.2) - 4 bytes, cause unknown, previous explanation ruled out.
 * `.note.gnu.build-id` is an SHA-1 over the linked module. It cannot match until everything

@@ -8,8 +8,8 @@ Measurement:
 * `build/offsetdiff.py <shipped> <rebuilt>` - per-instruction operand diff of `.text`.
   Current: **3882 / 3939 functions (98.6%) semantically identical**, 97.3% of `.text`.
 * `build/fulldiff.py <shipped> <rebuilt>` - whole-file scoreboard, every section, the
-  symbol table, the relocations and the string tables. Current: **37,630 bytes still
-  differ (1.96% of the file)**; see `FINDINGS-byte-gap.md`.
+  symbol table, the relocations and the string tables. Current: **28,368 bytes still
+  differ (1.48% of the file)**; see `FINDINGS-byte-gap.md` and `FINDINGS-toolchain.md`.
 
 ## Barriers
 
@@ -20,7 +20,7 @@ Measurement:
 | 3 | vendor kernel tree + `.config` (Fullhan FH865X, Linux 4.9.129) | **solved** - see `FINDINGS-vendor-kernel.md` |
 | 4 | build path `/data1/jiangqifeng6/...` baked into `.rodata` by `__FILE__` | **solved** - see `FINDINGS-byte-gap.md` |
 | 5 | driver `#ifdef` configuration | **solved** - see `FINDINGS-driver-config.md` |
-| 6 | GCC's `--with-pkgversion` string, 159 copies in `.comment` | open - needs a rebuilt GCC 6.5.0 |
+| 6 | GCC's `--with-pkgversion` string, 159 copies in `.comment` | **solved** - see `FINDINGS-toolchain.md` |
 
 ## Work packages
 
@@ -38,7 +38,7 @@ Measurement:
   `/data1/jiangqifeng6/work/tongyibianyi/develop_branch/wifi/rtl8188FU_linux_v5.15.3-6-g1a2e952f9.20230217`
   and pins `__DATE__`/`__TIME__` to `Dec 25 2023` / `20:43:27`. Every string our build
   emits is now present in the shipped module; zero path-like differences remain.
-- **WP-D** *(now 75% of the remaining problem)* reconstruct `ez_sc.c` / `ez_wifi_config.c`
+- **WP-D** *(now 99% of the remaining problem)* reconstruct `ez_sc.c` / `ez_wifi_config.c`
   from `8188fu.ko.c` (Hex-Rays). 46 functions, ~9.6 KB of `.text`, ~28 KB of the 37.6 KB
   whole-file gap. Constraints the binary already pins down:
   * four exact line counts on the patch (`collect_bss_info` +61 lines in `rtw_mlme_ext.c`,
@@ -48,12 +48,18 @@ Measurement:
   * 115 OEM strings, byte for byte, from `fulldiff.py --strings`;
   * eight strings the OEM files duplicate from public files (`CN`, the vendor-IE messages);
   * one OEM file prints `__DATE__`/`__TIME__`, compiled at `20:43:30`;
+  * exactly two `.comment` copies are missing, which is a third independent witness that
+    the OEM code is two translation units and not one or three;
   * the OEM code calls `kernel_read`, `kmem_cache_alloc`/`kmalloc_caches` and
     `copy_to_user` (two extra out-of-line copies), none of which the public code reaches;
   * 8 `.data` objects, 9 `.bss` objects and 19 `__func__` constants, with exact sizes.
-- **WP-F** *(new, 25% of the gap)* build GCC 6.5.0 with
-  `--with-pkgversion='arm_multilib_uclibc_20200924'`. That string is the only thing
-  separating our `.comment` from the shipped one and it reaches nothing else.
+- **WP-F** build GCC 6.5.0 with `--with-pkgversion='arm_multilib_uclibc_20200924'`
+  *(done - `FINDINGS-toolchain.md`)*. `build/build-gcc-vendor.sh` rebuilds it from the FSF
+  tarball with the kernel.org crosstool's own configure options plus that one string; no
+  patches were needed. `.comment` went 9,347 -> **84** bytes (exactly the two OEM object
+  files), the whole file 37,630 -> **28,368**, and codegen is untouched: all **158 object
+  files are byte-identical** to the stock compiler's once `.comment` is removed, and
+  `offsetdiff.py` still reports 3882/3939.
 
 ## Residuals
 

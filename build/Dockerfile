@@ -27,6 +27,14 @@ RUN printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-ch
 WORKDIR /opt
 RUN curl -fsSL "https://mirrors.edge.kernel.org/pub/tools/crosstool/files/bin/arm64/6.5.0/arm64-gcc-6.5.0-nolibc-arm-linux-gnueabi.tar.xz" \
       | tar -xJ && ls /opt
+#
+# That prebuilt is stock GCC, so its .comment reads "GCC: (GNU) 6.5.0" while the
+# shipped module reads "GCC: (arm_multilib_uclibc_20200924) 6.5.0" - GCC's
+# --with-pkgversion string, 159 copies of it. build/build-gcc-vendor.sh rebuilds
+# GCC 6.5.0 from source with the same configure options plus that pkgversion and
+# installs it alongside at /opt/gcc-6.5.0-vendor; the build scripts prefer it when
+# present. It is a runtime step (13 minutes, 3 GB of scratch), not an image layer.
+# See FINDINGS-toolchain.md.
 ENV PATH="/opt/gcc-6.5.0-nolibc/arm-linux-gnueabi/bin:${PATH}"
 RUN arm-linux-gnueabi-gcc --version && arm-linux-gnueabi-gcc -v 2>&1 | tail -3
 
