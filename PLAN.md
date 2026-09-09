@@ -5,17 +5,20 @@ Reference: `/path/to/8188fu.ko`, 1,918,056 bytes,
 
 Measurement:
 
-* `build/offsetdiff.py <shipped> <rebuilt>` - per-instruction operand diff of `.text`.
-  Current: **3882 / 3939 functions (98.6%) semantically identical**, 97.3% of `.text`.
 * `build/fulldiff.py <shipped> <rebuilt>` - whole-file scoreboard, every section, the
-  symbol table, the relocations and the string tables. Current: **28,368 bytes still
-  differ (1.48% of the file)**; see `FINDINGS-byte-gap.md` and `FINDINGS-toolchain.md`.
+  symbol table, the relocations and the string tables. Current: **1,296 bytes still
+  differ (0.068% of the file)**, and **34 of 41 sections are byte-identical**; see
+  `FINDINGS-oem-catalogue.md`, `FINDINGS-byte-gap.md` and `FINDINGS-toolchain.md`.
+* `build/offsetdiff.py <shipped> <rebuilt>` - per-instruction operand diff of `.text`.
+* `build/oem/run.sh`, `build/oem/pub.sh` - the WP-D loop: compile only the two OEM
+  translation units, or one public file, and score each function against the shipped
+  module in seconds.
 
 ## Barriers
 
 | # | barrier | status |
 |---|---|---|
-| 1 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) are not in the Realtek tarball | open - reconstruct from Hex-Rays |
+| 1 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) are not in the Realtek tarball | **reconstructed** - 37/46 byte-identical, see `FINDINGS-oem-catalogue.md` |
 | 2 | vendor compiler | **solved** - stock GCC 6.5.0 (kernel.org crosstool) matches |
 | 3 | vendor kernel tree + `.config` (Fullhan FH865X, Linux 4.9.129) | **solved** - see `FINDINGS-vendor-kernel.md` |
 | 4 | build path `/data1/jiangqifeng6/...` baked into `.rodata` by `__FILE__` | **solved** - see `FINDINGS-byte-gap.md` |
@@ -38,21 +41,16 @@ Measurement:
   `/data1/jiangqifeng6/work/tongyibianyi/develop_branch/wifi/rtl8188FU_linux_v5.15.3-6-g1a2e952f9.20230217`
   and pins `__DATE__`/`__TIME__` to `Dec 25 2023` / `20:43:27`. Every string our build
   emits is now present in the shipped module; zero path-like differences remain.
-- **WP-D** *(now 99% of the remaining problem)* reconstruct `ez_sc.c` / `ez_wifi_config.c`
-  from `8188fu.ko.c` (Hex-Rays). 46 functions, ~9.6 KB of `.text`, ~28 KB of the 37.6 KB
-  whole-file gap. Constraints the binary already pins down:
-  * four exact line counts on the patch (`collect_bss_info` +61 lines in `rtw_mlme_ext.c`,
-    `rtw_wx_set_priv` +2 in `ioctl_linux.c`, both efuse map writers +1 in `rtw_efuse.c`);
-  * four public functions carrying OEM call sites (`OnProbeReq` -176, `rtw_ioctl` -332,
-    `OnProbeRsp` -12, `rtw_usb_primary_adapter_init` -8);
-  * 115 OEM strings, byte for byte, from `fulldiff.py --strings`;
-  * eight strings the OEM files duplicate from public files (`CN`, the vendor-IE messages);
-  * one OEM file prints `__DATE__`/`__TIME__`, compiled at `20:43:30`;
-  * exactly two `.comment` copies are missing, which is a third independent witness that
-    the OEM code is two translation units and not one or three;
-  * the OEM code calls `kernel_read`, `kmem_cache_alloc`/`kmalloc_caches` and
-    `copy_to_user` (two extra out-of-line copies), none of which the public code reaches;
-  * 8 `.data` objects, 9 `.bss` objects and 19 `__func__` constants, with exact sizes.
+- **WP-D** reconstruct `ez_sc.c` / `ez_wifi_config.c` *(done - `FINDINGS-oem-catalogue.md`)*.
+  The two file names came out of the shipped `STT_FILE` symbols; their symbol grouping
+  gave each file's `.text`/`.rodata`/`.data`/`.bss` ranges and so the 18/28 function
+  split. Both files, their nine `.bss` and eight `.data` objects, all 115 strings, and
+  the four public call sites (`rtw_ioctl`, `OnProbeReq`, `OnProbeRsp`,
+  `rtw_usb_primary_adapter_init`) are reconstructed and wired in behind `CONFIG_EZ_WIFI`.
+  **28,368 -> 1,296 bytes**; `.rodata.str1.1`, `.rodata`, `.data`, `.bss`, `.comment`,
+  `.strtab` and eleven of twelve relocation sections are now byte-identical. Nine OEM
+  functions still differ, all by register allocation or block ordering; the catalogue
+  lists each one and what is known about it.
 - **WP-F** build GCC 6.5.0 with `--with-pkgversion='arm_multilib_uclibc_20200924'`
   *(done - `FINDINGS-toolchain.md`)*. `build/build-gcc-vendor.sh` rebuilds it from the FSF
   tarball with the kernel.org crosstool's own configure options plus that one string; no
@@ -63,11 +61,13 @@ Measurement:
 
 ## Residuals
 
-`_rtw_skb_alloc` (92 bytes) and `rtw_efuse_analyze` (4 bytes) are still unexplained, and
-`rtw_sptime_get` is confirmed to be identical code with one extra alignment `nop`. All
-three are analysed in `FINDINGS-byte-gap.md` section 4 - including a disproof of the
-previous `-fmerge-constants` explanation for `rtw_efuse_analyze`, and the exact C
-reconstruction of the shipped `_rtw_skb_alloc`.
+`_rtw_skb_alloc` (92 bytes) is **closed**: `FINDINGS-byte-gap.md` section 4.1's
+reconstruction is correct, and it settles that note's open question in favour of an OEM
+patch to `os_dep/osdep_service.c` rather than a patched `skbuff.h` - the same source
+compiled against the same unmodified vendor headers reproduces the shipped function.
+`rtw_sptime_get` is also closed; its 4-byte difference was the literal-pool alignment
+`nop` section 4.3 predicted, and it disappeared once the OEM code moved the function.
+`rtw_efuse_analyze` (4 bytes) remains, exactly as analysed in section 4.2.
 
 Each work package is done by one agent, which writes a markdown report into the repo
 and commits it, so this file plus those reports are the full record.

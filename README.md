@@ -52,22 +52,21 @@ path and timestamp (`build/build-vendorpath.sh`), and a GCC 6.5.0 rebuilt with t
 
 ## Result
 
-Byte-exact for the whole module is not reachable (see below), but with the
-**exact compiler** the majority of the driver now reproduces bit-for-bit.
+With the exact compiler, the exact kernel, the recovered `#ifdef` set, the vendor's
+own build path and the two reconstructed OEM translation units, the module now
+reproduces to within **0.068%**.
 
 | metric | result |
 |---|---|
 | `vermagic` | **exact match** — `4.9.129 mod_unload ARMv7 p2v8` |
 | ARM ELF attributes | **identical** (all 15 tags) |
 | `.modinfo` | **byte-identical** (9,246 bytes: params, descriptions, alias, version) |
-| compiled source files | **157 / 159** (missing only the two OEM files) |
-| function symbols present | **3893 / 3939 = 98.8%** (the 46 missing are all OEM) |
-| function symbols we build that the shipped module lacks | **0** |
-| same-size functions | **3886** |
-| **byte-identical functions** | **3882 = 98.6% of the module, 97.3% of `.text`** |
-| module size | 1,894,584 vs 1,918,056 shipped (−1.2%, all OEM code) |
-| **whole file** | **28,368 of 1,918,056 bytes still differ (1.48%)** — see `FINDINGS-byte-gap.md` |
-| `.comment` | our 157 `.ident` copies are a **byte-exact prefix** of the shipped 159 |
+| compiled source files | **159 / 159** — the two OEM files are reconstructed (`FINDINGS-oem-catalogue.md`) |
+| function symbols | **3909 / 3909**, none missing, none extra |
+| same-size functions | **3901 / 3909** |
+| **whole file** | **1,296 of 1,918,056 bytes still differ (0.068%)** |
+| byte-identical sections | **34 / 41**, including `.rodata.str1.1`, `.rodata`, `.data`, `.bss`, `.comment`, `.strtab` and eleven of the twelve relocation sections |
+| what is left | nine OEM functions differing only by register allocation or block ordering, one 4-byte public residual, and the build-id hash |
 
 Those figures are against the **Fullhan vendor kernel** (`build/Dockerfile.vendor`,
 `FINDINGS-vendor-kernel.md`) with the recovered driver configuration
