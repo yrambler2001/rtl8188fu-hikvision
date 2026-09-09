@@ -27,6 +27,9 @@ for c in "$VENDOR_ROOT/core/.rtw_mlme.o.cmd" "$SRC/core/.rtw_mlme.o.cmd"; do
     [ -f "$c" ] && { CMD=$c; break; }
 done
 [ -n "$CMD" ] || { echo "!! no core/.rtw_mlme.o.cmd - run a full build first" >&2; exit 1; }
+# The vendor-path build copies the tree, so its -I flags point at a snapshot.
+# Rewrite them back to $SRC so header edits take effect without a full rebuild.
+SEDROOT="s#$VENDOR_ROOT#$SRC#g" 
 
 FLAGS=$(head -1 "$CMD" | sed -e 's/^[^=]*:= *//' \
                              -e 's/^[^ ]*gcc //' \
@@ -35,7 +38,7 @@ FLAGS=$(head -1 "$CMD" | sed -e 's/^[^=]*:= *//' \
                              -e "s/-D__TIME__='\"[^\"]*\"'//" \
                              -e "s/-D__DATE__='\"[^\"]*\"'//" \
                              -e 's/-DKBUILD_BASENAME=[^ ]*//' \
-                             -e 's/-DKBUILD_MODNAME=[^ ]*//')
+                             -e 's/-DKBUILD_MODNAME=[^ ]*//' -e "$SEDROOT")
 
 mkdir -p "$OUT"
 build() {           # build <basename> <__TIME__>

@@ -24,7 +24,7 @@
  * v5.15.3 tarball gives 10521, so the vendor's rtw_mlme_ext.c carries exactly
  * 61 more lines before that point (FINDINGS-driver-config.md).
  *
- * Twenty-one of those 61 are recovered from the binary and are in this file:
+ * Twenty-one of those are recovered from the binary and are in this file:
  * three for the `int ez_ret;` declaration in OnProbeReq(), fourteen for the
  * smart-config / EID-208 block that OnProbeReq() runs just before it looks for
  * the SSID element, and four for the ez_probe_response_eid208_handler() call in
@@ -32,7 +32,7 @@
  * shipped module, so the *code* the vendor added above collect_bss_info() is
  * fully accounted for.
  *
- * The remaining 40 lines emitted no code: comments, blank lines, a different
+ * The remaining lines emitted no code: comments, blank lines, a different
  * brace or wrapping style, or edits inside a block this build compiles out.
  * The binary cannot say which.  They are reproduced here as this comment so
  * that __LINE__ downstream of it matches the shipped module exactly; that is
@@ -51,10 +51,9 @@
  * so the whole delta is comment.
  *
  * If a later pass recovers real vendor code that belongs above
- * collect_bss_info(), shrink this comment by the number of lines it adds - the
- * total above that function is what has to stay at 61, not this block's size.
- * Verify with:  grep -n 'IE too long (%d) for survey' core/rtw_mlme_ext.c
- * which must report line 10582.
+ * collect_bss_info(), shrink this comment by the number of lines it adds - what
+ * has to stay fixed is collect_bss_info()'s __LINE__, not this block's size.
+ * Verify with:  build/oem/pub.sh core/rtw_mlme_ext.c collect_bss_info
  */
 
 struct mlme_handler mlme_sta_tbl[] = {
