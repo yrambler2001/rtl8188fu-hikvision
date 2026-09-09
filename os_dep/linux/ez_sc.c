@@ -386,14 +386,17 @@ int ez_probe_requst_eid208_handler(u8 *pframe, int len)
 	if (probe_resp_t.id == 0x6990) {
 		probe_resp_t.id = 0x6991;
 	} else if (probe_resp_t.id == 0x6992) {
+		struct ez_tlv_t tlv;
+
 		if (!err_status)
 			return 0;
+
+		tlv.value = err_status;
 		probe_resp_t.element_len += 4;
 		probe_resp_t.id = 0x6993;
-		probe_resp_t.value[probe_resp_t.len] = 0x94;
-		probe_resp_t.value[probe_resp_t.len + 1] = 0x69;
-		probe_resp_t.value[probe_resp_t.len + 2] = 1;
-		probe_resp_t.value[probe_resp_t.len + 3] = err_status;
+		tlv.id = 0x6994;
+		tlv.len = 1;
+		memcpy(&probe_resp_t.value[probe_resp_t.len], &tlv, sizeof(tlv));
 	}
 
 	printk("%s()\r\n", __FUNCTION__);

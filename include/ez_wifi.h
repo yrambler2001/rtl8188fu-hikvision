@@ -34,6 +34,13 @@ struct ez_new_sc_t {
 	u16	len;
 };					/* 516 bytes */
 
+/* the 4-byte sub-element ez_probe_requst_eid208_handler() appends */
+struct ez_tlv_t {
+	u16	id;
+	u8	len;
+	u8	value;
+};					/* 4 bytes */
+
 struct ez_scan_cmd_t {
 	u8	cmd;
 	u8	len;
