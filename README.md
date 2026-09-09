@@ -4,11 +4,11 @@ A byte-level reproduction of the `8188fu.ko` shipped in a Hikvision/EZVIZ IP
 camera firmware (`root_b240427`), together with the reconstructed source of the
 two OEM translation units that are in no public Realtek release.
 
-**Current state: 455 of 1,918,056 bytes differ — 0.024% of the file.**
-Every section except `.text`, `.rel.text`, `.symtab`, `.strtab` and
-`.note.gnu.build-id` is byte-identical. Four of the 3,909 functions in `.text`
-differ: one by two ARM instructions, one by one, and two only in which registers
-GCC chose.
+**Current state: 348 of 1,918,056 bytes differ — 0.018% of the file.**
+**35 of the 41 sections are byte-identical**, `.strtab` among them: all 879
+`__func__.NNNN` uniquifiers now match, so the symbol table's order is exact
+with the suffixes and not only without them. Four of the 3,909 functions in
+`.text` differ — by two ARM instructions, by one, by one, and by two registers.
 The other 3,905 differ at most in relocated operands and `B`/`BL`
 displacements — link layout, caused by those four moving things — and none of
 the four differs for any semantic reason.
@@ -65,7 +65,7 @@ configuration, and the small number of vendor edits to Realtek's own files.
 | 3 | driver `#ifdef` configuration | **closed** — `FINDINGS-driver-config.md` |
 | 4 | build path baked into `.rodata` by `__FILE__`, and `__DATE__`/`__TIME__` | **closed** — `FINDINGS-byte-gap.md` §3 |
 | 5 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) not in any release | **reconstructed** — 42/46 byte-identical, `FINDINGS-oem-catalogue.md` |
-| 6 | `DECL_UID` uniquifiers (`__func__.NNNN`) in `.symtab`/`.strtab` | **closed for 863 of 879 symbols** — `FINDINGS-oem-catalogue.md` §11 |
+| 6 | `DECL_UID` uniquifiers (`__func__.NNNN`) in `.symtab`/`.strtab` | **closed** — 879/879, `.strtab` byte-identical, `FINDINGS-oem-catalogue.md` §11 |
 
 ### 3.1 The compiler
 
@@ -178,8 +178,20 @@ function prototypes: those were declared where they are called. Splitting
 `include/ez_wifi.h` that way, and putting the prototypes in
 `include/ez_wifi_fn.h`, took the mismatch from 726 symbols to 16. It also fixes
 the vendor's *source order*, which `.text` order cannot (`.text` is reverse
-postorder of the call graph): two OEM functions were in the wrong place and have
-been moved.
+postorder of the call graph): three OEM functions were in the wrong place and
+have been moved. The last of those, `ez_probe_req_handler`, is confirmed twice
+over — it is the only placement that leaves every byte-identical OEM function
+byte-identical *and* makes every uniquifier interval non-negative, and it cuts
+the raw `.symtab` difference from 7,482 bytes to 3,312, because local symbols
+are emitted in source order.
+
+The remaining 65 declarations the oracle demands emit no code — the kernel
+builds with `-Wno-unused-variable` — so **which** they were is not recoverable
+from the binary. **How many**, and **between which two functions**, is pinned
+exactly, so each interval carries one clearly-labelled placeholder of that size
+(`*_uid_gap_*`, an enum or a typedef, emitting nothing). With those, all 879
+uniquifiers match and `.strtab` is byte-identical. They are placeholders, not
+recovered vendor code, and are commented as such.
 
 ## 4. Result
 
@@ -191,32 +203,40 @@ been moved.
 | `.comment` | **byte-identical** (6,837 bytes) |
 | `.rodata`, `.rodata.str1.1`, `.data`, `.bss`, `__param`, `__ksymtab*` | **byte-identical** |
 | `.ARM.exidx` and all 3 other exidx sections | **byte-identical** (3,909 unwind entries) |
+| `.strtab` | **byte-identical** (124,098 bytes) |
+| `.symtab` symbol order | **identical**, including the `.NNNN` uniquifiers |
 | relocation sections | **11 of 12 byte-identical**; `.rel.text` differs only inside the four functions below |
 | compiled source files | **159 / 159** |
 | function symbols | **3,909 / 3,909**, none missing, none extra |
 | byte-identical functions in `.text` | **3,905 / 3,909** |
-| local symbol uniquifiers | **863 / 879** |
-| **whole file** | **455 of 1,918,056 bytes differ (0.024%)** |
+| local symbol uniquifiers | **879 / 879** |
+| byte-identical sections | **35 / 41** |
+| **whole file** | **348 of 1,918,056 bytes differ (0.018%)** |
 
 ### What still differs
 
-Four functions, all in the reconstructed OEM code, and all register allocation:
+Where the 348 bytes are:
+
+| section | bytes | what |
+|---|---:|---|
+| `.rel.text` | 280 | 17 shipped / 18 ours unmatched relocation entries — almost all of them one displaced literal pool |
+| `.text` | 36 | 16 bytes of size delta across three functions, 20 bytes of content in a fourth |
+| `.note.gnu.build-id` | 20 | an SHA-1 of the linked output; converges last, by construction |
+| `.symtab` | 12 | three `st_size` fields |
+
+Four functions, all in the reconstructed OEM code, and every one of them a
+register-allocation or CSE decision rather than anything semantic:
 
 | function | delta | cause |
 |---|---:|---|
-| `process_config_vars` | +8 (2 insns) | the shipped build spills the `pick` parameter and so has a spare callee-saved register for the `pos \| n` value; ours keeps `pick` in `sl`, which splits `pos` across two registers |
-| `ez_scan_device_ioctl_handle` | +4 (1 insn + 1 pool word) | the shipped build derives `&probe_req_t` from the `.bss` section anchor with an `add`; ours loads it from the literal pool |
-| `ez_strsep` | 80 bytes, right size | one if-conversion, and an out-of-SSA coalescing choice: `q = p; c = *p++;` makes `q` the loop PHI's own value, so exactly one of `{PHI, p+1}` and `{PHI, q}` can be coalesced and GCC picks the other one |
-| `ez_new_sc_ioctl` | 20 bytes, right size | an IRA preference tie: `rq` and `is_null` both prefer `r1` at weight 2000 and cancel, but `rq` has an extra uncontested weight-125 preference for `r2` from the `add r2, rq, #16` that sets up the third argument |
+| `ez_scan_device_ioctl_handle` | +4, and ~192 of the `.rel.text` bytes | one literal-pool word. The shipped build derives `&probe_req_t` from the `.bss` section anchor with `add r5, r4, #612` (612 is an encodable ARM immediate) and then `&probe_req_t.value` with `add r0, r5, #10`. Ours folds `anchor + 622` — not encodable — into a single pool constant at `cse_local`, and that word displaces every pool entry after it. `FINDINGS-oem-catalogue.md` §16 |
+| `process_config_vars` | +8 (2 insns) | a `mov r5,r1` / `mov r1,r5` pair on the loop back edge. The shipped build keeps `n` in a callee-saved register across the two calls, so IRA has twelve call-crossing allocnos, spills three, and `pos` fits in one register. Ours rematerialises `n = 0` because VRP asserts it from the loop guard. §17 |
+| `ez_strsep` | +4, 3 insns | one copy on the loop back edge: an out-of-SSA tie between coalescing the loop PHI with `q` or with `p + 1`. §18 |
+| `ez_new_sc_ioctl` | 20 bytes, right size | an IRA preference tie: `rq` and `is_null` both prefer `r1` at weight 2000 and cancel, and `rq`'s uncontested weight-125 preference for `r2` — from the `add r2, rq, #16` that sets up the third argument — decides |
 
-plus 16 `__func__` uniquifiers in the two OEM files, whose gap arithmetic says
-the vendor's sources declare 65 more locals than ours — declarations that emit
-no code (the kernel builds with `-Wno-unused-variable`) and so leave no other
-trace in the binary. `FINDINGS-oem-catalogue.md` §11 states the per-gap deficit
-exactly.
-
-`.note.gnu.build-id` is an SHA-1 over the linked output and converges last, by
-construction.
+All four were searched mechanically, not guessed at: about 27,000
+semantically-neutral spellings through `build/oem/gen.py` and
+`build/oem/lab.py`. §10 says what was swept for each.
 
 ## 5. Reproducing it
 
@@ -286,9 +306,34 @@ docker exec fuv sh /src/build/oem/run.sh --score          # machine-readable: n=
 docker exec fuv sh /src/build/oem/pub.sh core/rtw_mlme_ext.c OnProbeReq -v
 docker exec fuv sh /src/build/oem/dis.sh 0x92220 0x94570  # annotated shipped disassembly
 docker exec fuv sh /src/build/oem/ourdis.sh ez_sc NAME    # our object, one function
-docker exec fuv sh /src/build/oem/uidfn.sh os_dep/linux/ez_sc.c   # DECL_UID uniquifiers
+docker exec fuv sh /src/build/oem/asm.sh ez_sc            # our assembly, whole unit
+docker exec fuv python3 /src/build/oem/uidgap.py          # the DECL_UID oracle, per interval
+docker exec fuv sh /src/build/oem/uidat.sh /path/any.c    # uniquifiers of an arbitrary file
 docker exec fuv sh /src/build/oem/dump.sh ez_sc -fdump-rtl-ira    # GCC internals
 ```
+
+For the residuals that are compiler tie-breaks rather than semantics, don't
+hand-guess C shapes — generate them. A *spec* in `build/oem/specs/` expresses
+one function as a template with orthogonal, semantically-neutral axes
+(declaration order, local types, temporary versus recomputation, `if/else`
+versus early return, operand and short-circuit order, loop form, `switch`
+versus if-chain, cached base pointer versus repeated dereference, statement
+order where independent); `gen.py` splices every combination into a real copy
+of the translation unit and `lab.py` compiles and scores them ten at a time,
+about thirty a second:
+
+```sh
+python3 build/oem/gen.py --spec build/oem/specs/ez_strsep.py --out build/oem/lab/s1
+docker exec fuv sh -c 'cd /src && python3 build/oem/lab.py \
+        --unit ez_wifi_config --dir build/oem/lab/s1 --fn ez_strsep -j 10'
+```
+
+Each variant is scored three ways: `n` differing words, `d` size delta, and
+`s` — the Levenshtein distance of the two instruction sequences with the
+register fields blanked out. Steer by `s`: a variant that is right except for
+which registers IRA picked scores nearly every word different, so `n` is
+almost useless as a gradient. Results are cached by source hash;
+`build/oem/lab/` is scratch and untracked.
 
 `build/oem/oemdiff.py` compares an object file to the *linked* module, which
 cannot be done positionally: bytes under a relocation are masked and compared
@@ -314,14 +359,15 @@ that is what hid barrier 6 (§3.6).
 
 ```
 $ python3 build/fulldiff.py /path/to/8188fu.ko ./8188fu.ko --brief
-   STRUCTURAL  455 bytes differ (0.024% of the shipped 1,918,056)
+   STRUCTURAL  348 bytes differ (0.018% of the shipped 1,918,056)
+   byte-identical sections: 35/41
 
 $ cmp /path/to/8188fu.ko ./8188fu.ko
 /path/to/8188fu.ko ./8188fu.ko differ: char 33, line 1
 
 $ sha256sum /path/to/8188fu.ko ./8188fu.ko
 a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  8188fu.ko   (shipped)
-744019f63225a72e5a0c4c23e4394ac04b5a61a1c9976c4115484ee79561fa93  8188fu.ko   (ours)
+cd34ad3edbc6b0fc756d76c50f095747883caa3bc70cedb630feb60543db7597  8188fu.ko   (ours)
 ```
 
 `cmp` is **not** clean, and the numbers above are the honest statement of how
@@ -346,6 +392,8 @@ build/
   build-vendorpath.sh                   the real build
   fulldiff.py offsetdiff.py bytecompare.py    scoreboards
   oem/                                  the per-function iteration harness
+  oem/gen.py oem/lab.py oem/specs/      the variant search
+  oem/uidgap.py                         the DECL_UID oracle, per interval
 FINDINGS-hardware.md                    the camera and the SoC
 FINDINGS-vendor-kernel.md               barrier 2
 FINDINGS-driver-config.md               barrier 3

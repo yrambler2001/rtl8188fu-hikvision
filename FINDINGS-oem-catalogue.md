@@ -5,15 +5,16 @@ This note is the catalogue WP-D was asked for: what the two missing translation
 units are, what is in them, how each fact was read out of the binary, and where
 the reconstruction stands.
 
-**Result so far:** the whole-file gap went **28,368 -> 455 bytes** (1.479% ->
-**0.024%** of 1,918,056). Every section except `.text`, `.rel.text`, `.symtab`,
-`.strtab` and `.note.gnu.build-id` is byte-identical - `.rodata.str1.1`,
-`.rodata`, `.data`, `.bss`, `.comment`, `.modinfo`, `.ARM.exidx`, the ARM
-attributes and eleven of the twelve relocation sections - and `.symtab` has the
-right size, the right entry count and no missing or extra symbol. **42 of the 46
-OEM functions are byte-identical**, and so are all four public functions the OEM
-patch distorts, plus `rtw_efuse_analyze` (section 14). Sections 10 to 14 are the
-current state; sections 1 to 9 are the original WP-D catalogue.
+**Result so far:** the whole-file gap went **28,368 -> 348 bytes** (1.479% ->
+**0.018%** of 1,918,056). **35 of the 41 sections are byte-identical** -
+`.rodata.str1.1`, `.rodata`, `.data`, `.bss`, `.comment`, `.modinfo`,
+`.ARM.exidx`, the ARM attributes, **`.strtab`** and eleven of the twelve
+relocation sections - and `.symtab` has the right size, the right entry count,
+no missing or extra symbol and the right symbol *order*, uniquifiers included.
+**42 of the 46 OEM functions are byte-identical**, and so are all four public
+functions the OEM patch distorts, plus `rtw_efuse_analyze` (section 14).
+Sections 10 to 18 are the current state; sections 1 to 9 are the original WP-D
+catalogue.
 
 ---
 
@@ -414,8 +415,51 @@ docker exec fuv sh /src/build/oem/run.sh                     # score all 46 OEM 
 docker exec fuv sh /src/build/oem/run.sh --fn NAME -v        # per-instruction dump
 docker exec fuv sh /src/build/oem/pub.sh core/rtw_mlme_ext.c OnProbeReq -v
 docker exec fuv sh /src/build/oem/dis.sh 0x92220 0x94570     # annotated shipped disassembly
+docker exec fuv sh /src/build/oem/ourdis.sh ez_sc NAME       # our object, one function
+docker exec fuv sh /src/build/oem/asm.sh ez_sc               # our assembly, whole unit
+docker exec fuv sh /src/build/oem/dump.sh ez_sc -fdump-rtl-ira      # GCC internals
+docker exec fuv sh -c 'SRCFILE=/src/build/oem/lab/run1/x.c \
+        sh /src/build/oem/dump.sh ez_sc -fdump-tree-all'     # ... of a lab variant
+docker exec fuv python3 /src/build/oem/uidgap.py             # the DECL_UID oracle
+docker exec fuv sh /src/build/oem/uidat.sh /path/to/any.c    # its uniquifiers
 python3 build/oem/oemdiff.py --shipped /path/8188fu.ko --catalogue
 ```
+
+### The variant search
+
+Hand-guessing C shapes stops paying after a few dozen tries; the last four
+residuals took about 27,000 machine-generated ones.  A *spec* expresses one
+function as a template with orthogonal, semantically-neutral axes -
+declaration order, local types, explicit temporary versus recomputation,
+`if/else` versus early return, operand order in commutative expressions,
+short-circuit order, loop form, `switch` versus if-chain, cached base pointer
+versus repeated dereference, extra locals, statement order where independent -
+and the generator splices every combination into a real copy of the unit:
+
+```sh
+python3 build/oem/gen.py --spec build/oem/specs/ez_strsep.py --out build/oem/lab/s1
+docker exec fuv sh -c 'cd /src && python3 build/oem/lab.py \
+        --unit ez_wifi_config --dir build/oem/lab/s1 --fn ez_strsep -j 10'
+```
+
+`lab.py` compiles ten at a time and scores each three ways:
+
+* `n` - differing 4-byte words, relocation-aware, from `oemdiff.py`;
+* `d` - the size delta;
+* `s` - the Levenshtein distance of the two instruction sequences **with the
+  register fields blanked out**.
+
+`s` is the one to steer by.  `n` is nearly useless as a gradient: a variant
+that is right except for which registers IRA picked scores almost every word
+different, and a positional comparison of two sequences that differ by one
+inserted instruction scores everything after it different too.  `s` says how
+many instructions really differ - `ez_strsep`'s residual is `s=3`, and the
+whole search for it was "find a shape below 6".
+
+Results are cached by source hash (plus any extra flags, plus a scoring
+version), so re-running a sweep after adding variants only compiles the new
+ones.  The specs used are in `build/oem/specs/`; `build/oem/lab/` is scratch
+and is not tracked.
 
 `oemdiff.py` compares an object file to the linked module, which cannot be done
 positionally: bytes under a relocation are masked and compared symbolically
@@ -433,56 +477,60 @@ names. `annot.py` resolves literal-pool addends so the shipped code is readable.
 | | bytes | share of file |
 |---|---:|---|
 | before WP-D | 28,368 | 1.479% |
-| start of this pass | 972 | 0.051% |
-| **now** | **455** | **0.024%** |
+| after WP-D | 972 | 0.051% |
+| after the first residual pass | 455 | 0.024% |
+| **now** | **348** | **0.018%** |
 
 | section | structural | what it is |
 |---|---:|---|
-| `.rel.text` | 312 | relocations inside the four functions below |
-| `.text` | 116 | those four functions |
-| `.note.gnu.build-id` | 19 | an SHA-1 of the module; converges last, by construction |
-| `.symtab` | 8 | two `st_size` fields |
+| `.rel.text` | 280 | 17 shipped / 18 ours unmatched relocation entries - almost all of them one displaced literal pool, see below |
+| `.text` | 36 | 16 bytes of size delta across three functions, 20 bytes of content in a fourth |
+| `.note.gnu.build-id` | 20 | an SHA-1 of the module; converges last, by construction |
+| `.symtab` | 12 | three `st_size` fields |
 
-Everything else is byte-identical, including every string, every data object,
-every unwind entry and eleven of the twelve relocation sections.  `.strtab` is
-15 bytes short and 14 of its 5,723 strings differ - all of them
-`__func__.NNNN` / `__FUNCTION__.NNNN` uniquifiers belonging to the two OEM
-files; see section 11.
+**35 of the 41 sections are byte-identical**, including `.strtab` - all 879
+`__func__.NNNN` uniquifiers now match, so `.symtab`'s symbol order is exact
+with the suffixes rather than only without them (section 11).  Raw positional
+difference is 347,821 bytes; that number is dominated by the 16-byte `.text`
+shift moving everything after the OEM objects, not by content.
 
 ### Closed during this pass
 
-| function | was | how |
-|---|---|---|
-| `ez_device_info_ioctl_handle` | -4 | `wrq->u.data.length` is a `__u16`, and the local it is read into is `u16`, not `u32`. Only then is `len - 9` a signed subtraction, which is what makes GCC keep it in the return register across the second `copy_from_user`. |
-| `ez_mac2u8` | +4 | returns `void`. The shipped epilogue has no `mov r0,#0` and nothing calls the function. |
-| `ez_wifi_func_poll_ioctl_handle` | 24 content | block order, see section 12. |
-| `ez_probe_requst_eid208_handler` | 60 content | the `struct ez_tlv_t` is filled in field order *after* `probe_resp_t` is updated. All 120 orderings of the five statements were tried; exactly one is byte-identical. |
-| `ez_set_new_sc` | -12 | `sc_cmd` is `int sc_cmd[2]`, not `u32`; and `NEW_SC_POLL_RESULT` tests the zero case first. See section 13. |
-| `rtw_efuse_analyze` | +4 | not OEM code at all - the vendor's one added line in `core/efuse/rtw_efuse.c` is a **brace**, see section 14. |
-| `process_config_vars` | +24 -> +8 | the `memcmp` result goes in a local so the call is unconditional, and the declaration order of the five `int` locals is `pos, n, m, j, end`. |
-| `ez_scan_device_ioctl_handle` | +12 -> +4 | `sc.len` is copied into a `u8 len;` before the `probe_req_t` fill; the `POLL_REASON` reason word is a `u8 reason[4]`, not a `u32`; the else arm sets `sc.len = 1; sc.value[0] = 0xff`. |
+| | was | now | how |
+|---|---|---|---|
+| `ez_strsep` | 156 bytes, 26 words | 160 bytes, 17 words, **3 instructions** | the escape test is two `if`s with a duplicated `memmove`; section 18 |
+| OEM source order | `ez_probe_req_handler` mid-file | just before `ez_scan_device_ioctl_handle` | the only interval the DECL_UID oracle scored *negative*; the move also cut `.symtab`'s raw difference from 7,482 to 3,312 bytes |
+| `ez_read_rssi_per_ant_ioctl` | had `precvpriv` | uses `padapter->recvpriv.rssi` | one declaration too many for the oracle, and byte-neutral either way |
+| the 16 uniquifiers | 863/879 | **879/879**, `.strtab` byte-identical | section 11 |
 
-**42 of 46 OEM functions are byte-identical** (`build/oem/run.sh`), and so are
-all four public functions the OEM patch distorts.
+Everything was searched mechanically rather than by hand: `build/oem/gen.py`
+expands a spec's orthogonal axes into whole translation units and
+`build/oem/lab.py` compiles and scores them ten at a time, about thirty a
+second.  Roughly 27,000 variants went through it in this pass.  Two scores
+matter and they disagree often: `d`, the size delta, and `s`, the Levenshtein
+distance of the instruction sequences with the register fields blanked out.
+`s` is the one that says whether a shape is right, because a wholesale
+register renaming makes almost every word differ while changing nothing
+structural.
 
 ### The four that remain
 
 | function | delta | what is known |
 |---|---:|---|
-| `process_config_vars` | +8 | Two instructions. The shipped build spills `pick` to the stack (`stm sp, {r2, r3}` at entry, two reloads) and so has a spare callee-saved register for the `pos \| n` value, which lets `pos` live in one register throughout; ours keeps `pick` in `sl`, which splits `pos` across two registers and costs a copy on the loop back-edge and on the `\r` path. IRA's dump names the cause exactly: the shipped build has 12 allocnos restricted to r3-r11 and spills the three cheapest (`len`, `var`, `pick`); ours has 11 and spills two, because our `n` is redefined on every exit from the switch's default case and so does not cross the calls. That redefinition is VRP folding `n` to 0 inside the switch (from the `(pos\|n) == 0` assertion) and `uncprop` then writing the OR value back in its place. All 120 declaration orders x 7 types for `n` were swept; none produces the spill. |
-| `ez_scan_device_ioctl_handle` | +4 | One instruction plus one literal-pool word. The shipped build materialises the OEM `.bss` anchor once into a callee-saved register and derives `&probe_req_t` as `add r5, r4, #612` and `&probe_req_t.value` as `add r0, r5, #10`; ours loads the anchor twice (caller-saved for the byte stores, callee-saved for what must survive the `memcpy`) and loads `&probe_req_t.value` from the pool. This is GCC's section-anchor costing; local pointer variables, member-access rewrites and every declaration order leave it unchanged. |
-| `ez_strsep` | 80 content | Right size. Reconstructed instruction by instruction. Two differences. (a) Ours if-converts `*p == esc \|\| *p == delim` into `cmp`/`cmpne` where the shipped build branches to a second test placed after the `memmove` block; writing it as two `if`s with a duplicated `memmove` reproduces the shipped block order exactly (section 12). (b) The loop is `q = p; c = *p++;`, so in GIMPLE `q` is literally the loop PHI's value and out-of-SSA has to pick which copy to remove: coalescing the PHI with the post-increment pseudo (shipped - `mov r4, r5; ldrb r3,[r5],#1`, nothing on the back edge) or with `q` (ours - `mov r4, r5; ldrb r3,[r4],#1`, plus `mov r5, r4` on the back edge). They cannot both be coalesced, `q` interferes with `p + 1`, and both copies have the same loop frequency. That one extra copy is why (a) alone leaves the function 4 bytes long, so the short-circuit form is kept: a wrong `st_size` would also break `.symtab`. Fourteen loop shapes - pointer-carried, index-carried, `q = p++`, `p - 1`, `do`/`while`, inner-scope declarations - leave the choice unchanged. |
-| `ez_new_sc_ioctl` | 20 content | Right size, same eight instructions, different order: the shipped build computes the null-check boolean into `r3` and keeps `rq` in `r1` until `add r2, r1, #16`; ours copies `rq` to `r2` first and computes the boolean into `r1`. IRA's dump gives the mechanism exactly. There are two allocnos and three preferences: `pref0: is_null <- hr1 @2000` (from the outgoing argument copy), `pref1: rq <- hr1 @2000` (from the incoming parameter copy) and `pref2: rq <- hr2 @125`. The two `@2000`s cancel, because the allocnos conflict and `update_conflict_hard_regno_costs` charges each the other's preference; the `@125` does not, so `rq` takes `r2` and `is_null` falls to `r1`. That third preference comes from the `add r2, rq, #16` that sets up the *third* argument - IRA treats an insn whose output is a hard register as copy-like. Without it, `rq` would take `r1` and `is_null` `r3`, which is the shipped code exactly. Twenty-two source shapes and nine types for `is_null` were tried; none removes the preference, because every spelling of `&wrq->u.data` folds back into that one `add`. |
+| `ez_scan_device_ioctl_handle` | +4, and ~192 of the `.rel.text` bytes | One literal-pool word: `.LANCHOR0+622`, the address of `probe_req_t.value`.  It sits in the middle of the pool, so every entry after it moves by four and those relocations are most of `.rel.text`.  Section 16. |
+| `process_config_vars` | +8 | Two instructions, a `mov r5,r1` / `mov r1,r5` pair on the loop back edge.  IRA has eleven call-crossing allocnos where the shipped build has twelve, spills two instead of three, keeps `pick` in a register instead of the stack, and splits `pos` across two.  The twelfth is `n`: the shipped build never writes it in the switch's default case, ours rematerialises `n = 0` there because VRP proved it.  Section 17. |
+| `ez_strsep` | +4, 3 instructions | One copy on the loop back edge: an out-of-SSA coalescing tie between the loop PHI's `q` and its `p + 1`.  Section 18. |
+| `ez_new_sc_ioctl` | 20 content | Right size, same seven instructions, two registers swapped.  An IRA preference tie: `rq` and `is_null` both prefer r1 at weight 2000 and cancel, and `rq`'s uncontested weight-125 preference for r2 - from the `add r2, rq, #16` that sets up the third argument - decides.  Unchanged by 1,569 further shapes and by 23 optimisation flags. |
 
 ### Next steps, in the order worth doing them
 
-1. `process_config_vars` and `ez_scan_device_ioctl_handle` are one instruction
-   each and both are allocator decisions with a known cause; a GCC built with
-   `-fdump-ipa-all`/instrumented IRA cost dumps would settle them.
-2. `ez_strsep` needs the split escape test without the loop back-edge copy -
-   i.e. GCC coalescing the post-increment pseudo with the loop phi instead of
-   with `q`.
-3. The 16 OEM `__func__` uniquifiers in section 11.
+1. `ez_scan_device_ioctl_handle` is worth about 200 of the 348 bytes on its
+   own, and the mechanism is now known exactly (section 16): the fold happens
+   in `cse_local`, and what decides it is whether `&probe_req_t` and
+   `&probe_req_t.value` are still one expression by then.
+2. `process_config_vars` needs `n` live across the two calls, which needs VRP
+   not to assert `n == 0` at the switch (section 17).
+3. `ez_strsep` and `ez_new_sc_ioctl` are one instruction and two registers.
 4. `.note.gnu.build-id` will match by itself when the rest does.
 
 ---
@@ -538,52 +586,113 @@ Reading it:
 every declaration added above a `__LINE__`-constrained point was paid for by
 shrinking the line-count reconciliation comments by the same number of lines.
 
-**Result: 863 of 879 uniquified symbols match exactly**, `.strtab` is back to
-within 15 bytes of the shipped size, and `.symtab` is down from 127 `st_size`
-mismatches to 2.
+That took the mismatch from 726 symbols to 16, `.strtab` to within 15 bytes of
+the shipped size, and `.symtab` from 127 `st_size` mismatches to 2.  The rest
+of this section is how the last 16 were closed.
 
-### The 16 that remain, and what they say about the OEM sources
+### How the last 16 were closed
 
 The uniquifiers also fix the vendor's **source order**, which `.text` order
-cannot (`.text` is reverse postorder of the call graph).  Two functions were in
-the wrong place and have been moved: `check_probe_sync_EID` has the lowest
-`__func__` UID in ez_sc.c (70989) yet sat thirteenth in the file, and
+cannot (`.text` is reverse postorder of the call graph).  Three functions were
+in the wrong place and have been moved: `check_probe_sync_EID` has the lowest
+`__func__` UID in ez_sc.c (70989) yet sat thirteenth in the file,
 `ez_wifi_preinit` belongs between `ez_set_country` and
-`ez_read_rssi_per_ant_ioctl`.  Moving `check_probe_sync_EID` to just before
-`set_scan_flag` puts its uniquifier at exactly 70989.
+`ez_read_rssi_per_ant_ioctl`, and `ez_probe_req_handler` belongs immediately
+before `ez_scan_device_ioctl_handle`.
 
-What is left is a per-gap declaration deficit - the vendor's functions declare
-more than ours do.  Reading the gaps between consecutive `__func__` UIDs:
+That third move is worth dwelling on, because source order is *not* a free
+parameter.  `build/oem/uidgap.py` prints the deficit interval by interval, and
+after the first two moves exactly one interval scored **negative** - the span
+from `ez_device_info_ioctl_handle`'s `__func__` to `check_probe_sync_eid208`'s
+held 21 declarations here and 16 in the vendor's build.  Only two functions in
+that span have no `__func__` of their own to pin them, and moving the other
+one, `check_sn_valid`, breaks two functions' codegen outright.  Moving
+`ez_probe_req_handler` instead leaves every byte-identical OEM function
+byte-identical, makes every interval in both files non-negative - and cuts the
+raw `.symtab` difference from 7,482 bytes to 3,312, because local symbols are
+emitted in source order.  Two independent oracles agreeing is what makes it a
+finding rather than a guess.
+
+One declaration came out the same way.  `ez_read_rssi_per_ant_ioctl` cached
+four pointers; `build/oem/specs/decl_probe_wc.py` compiles it with each of them
+removed in turn and it stays byte-identical every time, so the binary does not
+say which the vendor had - but the oracle says it had one fewer, and
+`precvpriv` (whose only use was `precvpriv->rssi`) is the one dropped.
+`struct ez_rssi_per_ant` moves up to the file-scope declarations for the same
+reason: it is five DECL_UIDs, and the interval it was in was one over.
+
+### The 65 that could not be identified, only counted
+
+With source order settled, every interval in both files wanted *more*
+declarations than this reconstruction has - 47 across ez_sc.c and 18 across
+ez_wifi_config.c:
 
 ```
-ez_sc.c            gap                        vendor  ours  short by
-  check_probe_sync_EID -> rtw_ezviz_ie_set        66    56     10
-  -> ez_new_sc_ioctl_handle                       12    11      1
-  -> ez_device_info_ioctl_handle                  17    13      4
-  -> check_probe_sync_eid208                      16    21     -5
-  -> ez_probe_response_eid208_handler             11    10      1
-  -> ez_probe_requst_eid208_handler                9     8      1
-  -> ez_scan_device_ioctl_handle                  46    10     36
-                                                            = 48
-
-ez_wifi_config.c   before ez_set_country                            9
-  ez_set_country -> ez_wifi_preinit               16    17     -1
-  ez_wifi_preinit -> ez_read_rssi_per_ant_ioctl   18    19     -1
-  -> ez_get_mac_addr                              50    44      6
-  -> ez_wifi_func_poll_ioctl_handle               34    34      0
-  -> ez_read_efuse                                 9     8      1
-  -> ez_wifi_module_rf_calibration_check_ioctl    43    40      3
-                                                            = 17
+ez_sc.c            interval                             vendor  ours  short
+  check_probe_sync_EID -> rtw_ezviz_ie_set                 66    56     10
+  -> ez_new_sc_ioctl_handle                                12    11      1
+  -> ez_device_info_ioctl_handle                           17    13      4
+  -> check_probe_sync_eid208                               16    13      3
+  -> ez_probe_response_eid208_handler                      11    10      1
+  -> ez_probe_requst_eid208_handler                         9     8      1
+  -> ez_scan_device_ioctl_handle                           46    19     27
+                                                                     = 47
+ez_wifi_config.c
+  before ez_set_country                                                 4
+  ez_set_country -> ez_wifi_preinit                        16    12      4
+  ez_wifi_preinit -> ez_read_rssi_per_ant_ioctl            18    18      0
+  -> ez_get_mac_addr                                       50    44      6
+  -> ez_wifi_func_poll_ioctl_handle                        34    34      0
+  -> ez_read_efuse                                          9     8      1
+  -> ez_wifi_module_rf_calibration_check_ioctl             43    40      3
+                                                                     = 18
 ```
 
-The kernel builds with `-Wno-unused-variable` and `-Wno-unused-but-set-variable`,
-so unused locals - and `static` helpers that `-Os` inlines and deletes - cost
-DECL_UIDs and leave no other trace.  65 such declarations across the two files
-is entirely ordinary vendor code, but *which* they were is not recoverable from
-the binary, and inventing 65 named locals inside reconstructed OEM function
-bodies would be fabrication rather than reconstruction.  They are left as a
-measured residual.  The gap arithmetic above is the complete statement of what
-is missing; anyone who recovers the real sources can check it in one step.
+The kernel builds with `-Wno-unused-variable` and
+`-Wno-unused-but-set-variable`, so unused locals - and `static` helpers that
+`-Os` inlines and deletes - cost DECL_UIDs and leave no other trace.  65 such
+declarations across two files is entirely ordinary vendor code.  **Which** they
+were is not recoverable; **how many**, and **between which two functions**, is
+pinned exactly.
+
+So each interval gets one placeholder of exactly that size, named `*_uid_gap_*`
+and commented with the interval it stands for.  An `enum` costs one DECL_UID
+for the type and one per enumerator, a `typedef` costs one, and neither emits
+anything, so the count is all they carry.  The header comment on the first one
+in each file says plainly that they are placeholders rather than recovered
+vendor code.  This is the treatment `enum ez_unrecovered` in
+`include/ez_wifi_fn.h` already had for the five declarations `ioctl_linux.c`
+and `rtw_mlme_ext.c` demanded, applied to the rest.
+
+**Result: 879 of 879 uniquified symbols match, `.strtab` is byte-identical
+(124,098 bytes), and `.symtab`'s symbol order is identical with the suffixes
+rather than only without them.**  `build/oem/uidgap.py` reports 0 short in both
+files; delete any one placeholder and every `__func__.NNNN` after it in that
+file stops matching.
+
+### The DECL_UID accounting rules
+
+Measured against this exact compiler with `build/oem/uidat.sh`, which prints
+the uniquifiers of an arbitrary file, and `-fdump-tree-gimple-uid`, which
+prints every declaration's DECL_UID:
+
+| construct | DECL_UIDs |
+|---|---:|
+| function definition, before its body | `nparams + 2` - the PARM_DECLs first, then the FUNCTION_DECL, then the RESULT_DECL |
+| `(void)` parameter list | counts as one parameter; `()` counts as none |
+| local variable | 1 |
+| `struct`/`union` definition | `nfields + 1` |
+| `enum` definition | `nvalues + 1` |
+| `typedef` | 1 |
+| prototype | `1 + max(nparams, 1)` |
+| `for` / `while` loop | 3 - artificial labels, created where the loop *ends* |
+| `goto` label | 1, at first mention |
+| a definition that follows a prototype | +1 for the merged-away duplicate |
+| a definition that follows a tentative definition | +1, likewise |
+
+`__func__` is created at its **first use** inside the function, not at the
+function's start, so a `__func__` late in a body counts everything declared
+before it.
 
 ---
 
@@ -686,3 +795,205 @@ literal pool - which is the six-instruction window that differed.
 The brace also settles the line count: closing it costs exactly one line, which
 is the `+1` that `rtw_efuse.c`'s two `__LINE__` constants (2875 -> 2876 and
 3024 -> 3025) demanded.  The placeholder comment that stood in for it is gone.
+
+---
+
+## 15. A typedef of `int` is not `int`
+
+Section 13 said `uncprop` is type-sensitive: it rewrites a constant PHI
+argument into an SSA name known to hold that constant, but only when the types
+match.  This pass found how literally GCC means "match".
+
+`typedef signed int s32;` in `<linux/types.h>` does not make `s32` an alias for
+`int` inside the compiler.  `pushdecl` gives every named typedef its own
+variant type node so the typedef has a name to print:
+
+```c
+      else if (type != error_mark_node && TYPE_NAME (type) != x)
+	{
+	  type = build_variant_type_copy (type);
+	  TYPE_NAME (type) = x;
+	  TREE_TYPE (x) = type;
+	}
+```
+
+`types_compatible_p` still says the two are the same, and
+`__builtin_types_compatible_p(s32, int)` is 1 - but `uncprop` compares
+`TREE_TYPE` **pointers**, and so does the first test in
+`gimple_can_coalesce_p`:
+
+```c
+  tree t1 = TREE_TYPE (name1);
+  tree t2 = TREE_TYPE (name2);
+  if (t1 == t2)
+    { check_modes: ... }
+```
+
+So `int n` and `s32 n` compile differently.  In `process_config_vars`, with
+everything else held fixed, `int pos; int n;` is 352 bytes and `int pos; s32 n;`
+is 344 - the shipped size - because the second stops `uncprop` from rewriting
+`pos = 0` into the loop guard's `pos | n` value.  (It is not adopted: it costs
+more content bytes than the eight it saves in size, and the shape is still not
+the shipped one.  See section 17.)
+
+The practical consequence for a reconstruction is that `int`, `s32`, `u32`,
+`sint`, `long` and `unsigned long` are six different types for these passes
+even where four of them are the same 32-bit signed integer, and the binary can
+tell them apart.  `build/oem/specs/process_config_vars_types.py` sweeps the
+cross product for exactly this reason.
+
+---
+
+## 16. `ez_scan_device_ioctl_handle`: one literal-pool word, and where it comes from
+
+This is the most expensive residual in the file: four bytes of `.text` and
+about 192 of the 280 in `.rel.text`.
+
+Both builds put the OEM `.bss` anchor and two addresses derived from it in the
+function's literal pool.  Ours puts a third there, `.LANCHOR0+622` - the
+address of `probe_req_t.value` - and because the pool is emitted in
+first-reference order that word lands in the middle, displacing every entry
+after it by four bytes.  Eleven relocations move as a result, and each counts
+once as missing and once as extra.
+
+The shipped build never needs the constant:
+
+```
+	ldr	r4, .LANCHOR0		@ the anchor
+	add	r5, r4, #612		@ &probe_req_t     612 is encodable
+	...
+	add	r0, r5, #10		@ &probe_req_t.value
+```
+
+622 is not an ARM 8-bit-rotated immediate; 612 (`0x99` rotated) and 10 are.
+
+The RTL says both builds start identically.  `-fdump-rtl-expand` for the
+memcpy destination:
+
+```
+	(set (reg 276) (symbol_ref "*.LANCHOR0"))
+	(set (reg 277) (plus (reg 276) (const_int 612)))     ; &probe_req_t
+	(set (reg 278) (plus (reg 277) (const_int 10)))      ; &probe_req_t.value
+```
+
+and `probe_req_t.id = 0x6990` builds its own `&probe_req_t` the same way,
+because the field is an unaligned `u16` in a packed struct and GCC addresses
+the two byte stores off it.  Tracking `const_int 622` through the RTL dumps,
+it first appears at **`cse_local`** (pass 225): by then the two copies of
+`&probe_req_t` - one in the TRIG arm, one in the `if (len)` block - have not
+been combined by any global pass, the second has no other use, and folding
+`(plus (plus anchor 612) 10)` into the single constant is free.  In the shipped
+build they stay one expression, `&probe_req_t` survives into the shared block
+(which is why the `id` high byte is stored as `[r5, #8]` rather than
+`[r4, #620]`), and `&probe_req_t.value` is an `add`.
+
+Swept without moving it: 180 shapes over cached struct/byte/value pointers and
+declaration position, 270 more over those crossed with the copy order and the
+`id` spelling, and 105 over the order of the eight field writes.  Every one
+scores `d=+4 s=19` except three that reach the right size by a different route
+and cost 492 bytes elsewhere.  A GCC flag does move it - `-fno-tree-coalesce-vars`
+gives the right size - which confirms the mechanism is out-of-SSA/CSE and not
+anything expressible in the source that has been tried.
+
+---
+
+## 17. `process_config_vars`: the twelfth allocno is `n`
+
+Ours is 352 bytes to the shipped 344: two extra instructions, a `mov r5,r1` /
+`mov r1,r5` pair on the loop back edge.
+
+Read off the shipped disassembly, the register roles are
+
+```
+	sl = buf   r8 = i   r5 = j   r2 = pos   r6 = n   r4 = end   r7 = m
+	r9 = pos|n   fp = strlen(var)      stack: pick, var, len
+```
+
+and the crucial one is `r6`.  `n` is in a callee-saved register and the
+switch's default case - the one with the `strlen` and `memcmp` calls - never
+writes it: its value simply survives to the next iteration.  IRA therefore has
+twelve allocnos that cross the calls, spills the three cheapest (`pick`, `var`,
+`len`), and everything else fits.
+
+Ours rematerialises `n = 0` after the calls instead, so `n` never crosses them,
+IRA has eleven, spills two, keeps `pick` in `sl` - and to fit `pos` splits it
+across two registers, which is the two extra copies.
+
+Why ours can rematerialise is in the GIMPLE.  At `.094t.mergephi2` the loop
+PHI still reads
+
+```
+  # n_8 = PHI <n_9(4), 0(7), _28(11), _28(12), 1(10), n_9(25), n_9(24), ...>
+```
+
+- `n_9`, unchanged, on the default-case edges, exactly what the shipped build
+keeps.  `vrp1` turns those into `0`.  The assertion comes from GCC 6's
+`register_edge_assert_for`, which for `if ((a | b) != 0)` taking its false edge
+asserts `a == 0` and `b == 0` with no `has_single_use` guard on that path:
+
+```c
+  if (((comp_code == EQ_EXPR && integer_zerop (val))
+       || (comp_code == NE_EXPR && integer_onep (val))))
+    { ... register_edge_assert_for_1 (op0, EQ_EXPR, e, si);
+          register_edge_assert_for_1 (op1, EQ_EXPR, e, si); }
+```
+
+and the guard *is* an `IOR` by then: the C front end folds `n || pos` into
+`(n | pos) != 0` long before `ifcombine` runs.  Writing the guard as `n | pos`,
+`(n | pos) != 0`, `n != 0 || pos != 0` or `!!n | !!pos` all reach `vrp1` the
+same way, and all fold `n`.
+
+Swept: 2,592 structural shapes (guard spelling, both `|=` in the switch, where
+`pos = 0` sits, `for` vs `while`, declaration order), 16,807 type
+combinations over six locals and seven spellings of a 32-bit integer, 3,360
+crossing the two, and 288 where the guard value is given a name of its own and
+assigned explicitly where the shipped code uses `r9`.  Best structural distance
+is 18 instructions out of 86; the right *size* is reachable (`int pos; s32 n;`,
+section 15) but at the cost of more content bytes than it saves.
+
+The narrowest remaining hypothesis: the vendor's guard is not an `IOR` of the
+two flags at `vrp1` time - either because the two are not both plain locals, or
+because one of them is not the same SSA name the switch reads.
+
+---
+
+## 18. `ez_strsep`: the escape test, and the last copy
+
+Two things were wrong; one is now right.
+
+**Block layout.**  Writing `if (*p == esc || *p == delim)` as two separate
+`if`s, each with its own `memmove(q, p, strlen(q)); continue;`, reproduces the
+shipped block order exactly.  Cross-jumping merges the two copies again and
+keeps the *earlier* one, which is what puts the `*p == delim` test after the
+memmove block (section 12).  That takes the function from six instruction-level
+differences to three.
+
+It costs four bytes of `st_size`, and it is still the better trade end to end:
+the whole-file scoreboard goes 455 -> 348, because `.text` content falls from
+100 bytes to 20 and `.rel.text` from 312 to 280 against `.symtab` rising from 8
+to 12.  A resized function costs the scoreboard only its size delta; a
+same-size function with different content costs every differing byte.
+
+**The last copy** is out-of-SSA.  `q = p` is copy-propagated away, so the loop
+PHI *is* `q`, and the walk becomes
+
+```
+  p_10 = p_1 + 1;
+  c_11 = MEM[base: p_10, offset: -1];
+```
+
+The ARM post-increment forces `p_1` and `p_10` into one register, so whichever
+of the two the PHI is coalesced with keeps its register and the other needs a
+copy.  The shipped build coalesces `p + 1` - `mov r4, r5 / ldrb r3, [r5], #1`,
+nothing on the back edge - and copies the old pointer out for the later uses.
+Ours coalesces `q` and pays `mov r5, r4` to close the loop.  It also reuses
+`p_10` where the shipped build recomputes `add r3, r4, #1` for `q + 1`, which
+says the two are not the same SSA name there.
+
+Swept: 2,520 shapes over loop form, declaration order, `c`'s type and the
+escape test; 300 over the pointer types (`char *` and `u8 *` are not
+interchangeable to `gimple_can_coalesce_p`, section 15, and it makes no
+difference here because the cast is a useless conversion and `q` disappears
+anyway); 486 over which of the two pointers each use is written in terms of;
+and 16 genuinely different loop carriers - carry `p`, carry `q`, no `q` at all,
+an index, a `while` head.  All of them score exactly 3.
