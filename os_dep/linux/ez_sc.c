@@ -419,6 +419,7 @@ int ez_scan_device_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cm
 	struct iwreq *wrq = (struct iwreq *)rq;
 	struct ez_scan_cmd_t sc;
 	int ret;
+	u8 len;
 
 	if (!dev || !rq) {
 		printk("%s():  net or rq == NULL!\n", __func__);
@@ -440,8 +441,9 @@ int ez_scan_device_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cm
 
 	case TRIG_SCAN_DEVICE:
 		printk("cmd TRIG_SCAN_DEVICE!\n");
+		len = sc.len;
 		probe_req_t.element = 208;
-		probe_req_t.element_len = sc.len + 8;
+		probe_req_t.element_len = len + 8;
 		probe_req_t.sync[0] = 'E';
 		probe_req_t.sync[1] = 'Z';
 		probe_req_t.sync[2] = 'V';
@@ -459,8 +461,9 @@ int ez_scan_device_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cm
 
 	case TRIG_SCAN_REASON:
 		printk("cmd TRIG_SCAN_REASON!\n");
+		len = sc.len;
 		probe_req_t.element = 208;
-		probe_req_t.element_len = sc.len + 8;
+		probe_req_t.element_len = len + 8;
 		probe_req_t.sync[0] = 'E';
 		probe_req_t.sync[1] = 'Z';
 		probe_req_t.sync[2] = 'V';
@@ -468,9 +471,9 @@ int ez_scan_device_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cm
 		probe_req_t.sync[4] = 'Z';
 		probe_req_t.id = 0x6992;
 trig_scan:
-		if (sc.len) {
-			probe_req_t.len = sc.len;
-			memcpy(probe_req_t.value, sc.value, sc.len);
+		if (len) {
+			probe_req_t.len = len;
+			memcpy(probe_req_t.value, sc.value, len);
 		}
 		if (!probe_req_t.len) {
 			ret = 0;
