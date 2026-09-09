@@ -1107,6 +1107,34 @@ reason - **a conversion that only feeds a comparison against zero is dropped**:
 Only the *inner* casts survive, because there the outer `|` is genuinely
 `int`-typed and GIMPLE's type correctness requires them.
 
+### Where the layout actually moves, and the narrowest remaining hypothesis
+
+The block order is not changed by `reorder_basic_blocks_simple` at all - its
+dump shows the blocks already in ascending order both before and after, in
+both variants.  The move happens one pass earlier, in `pass_jump2`:
+cross-jumping merges the seven one-instruction `pos = 0` edge blocks, and
+`try_crossjump_to_edge` implements the merge by *splitting* the block that
+keeps the tail, inserting the new block into the chain at that point.  The
+block order at `265r.jump2` shows it directly:
+
+```
+  baseline   bb2 ... bb18 bb20 bb21 bb22 bb23 bb24 bb25 bb27 bb28 bb29 bb30
+  int-cast   bb2 ... bb23 bb26 bb32 bb27 bb28 bb29     <- bb32 out of order
+```
+
+`bb32` is the split product, and it lands between `bb26` and `bb27` rather
+than at the end.  So the residual is not "which register" and not "which
+source spelling" but **which block cross-jumping chooses to split**, and that
+is decided by the order the candidate blocks are visited in, which is the CFG
+order at that point.  Nothing in the 20,000 source variants tried here moves
+it, and the hypothesis worth testing next is the only one left that acts on
+that order: make the *first* `pos = 0` edge in CFG order be the one the tail
+should follow - i.e. reorder the selector's cases so that the earliest arm
+needing `pos = 0` is the one that falls through into the loop tail - rather
+than trying to change the guard again.  That is a change to the `if`-chain
+order, which is observable in the shipped block layout and therefore
+*constrained*: it may not be free.
+
 Swept, all compiled and scored against the shipped bytes: 2,592 structural
 shapes; 16,807 type combinations over six locals; 5,184 more crossing the
 types with three guards; 4,320 over all 720 declaration orders; 11,520 over
