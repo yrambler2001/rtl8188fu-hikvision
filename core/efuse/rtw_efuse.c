@@ -18,6 +18,7 @@
 #include <hal_data.h>
 
 #include "../hal/efuse/efuse_mask.h"
+/* OEM patch line-count reconciliation: +1, see core/rtw_mlme_ext.c. */
 
 /*------------------------Define local variable------------------------------*/
 u8	fakeEfuseBank = {0};

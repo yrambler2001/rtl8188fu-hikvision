@@ -1119,6 +1119,10 @@ _adapter *rtw_usb_primary_adapter_init(struct dvobj_priv *dvobj,
 	if (padapter == NULL)
 		goto exit;
 
+#ifdef CONFIG_EZ_WIFI
+	ez_wifi_preinit();
+#endif
+
 	if (loadparam(padapter) != _SUCCESS)
 		goto free_adapter;
 

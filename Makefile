@@ -101,6 +101,12 @@ CONFIG_TDLS = n
 CONFIG_WIFI_MONITOR = n
 CONFIG_MCC_MODE = n
 CONFIG_APPEND_VENDOR_IE_ENABLE = y
+# Not a stock Realtek switch: the OEM (EZVIZ/Hikvision) additions. The shipped
+# module carries two translation units that are in no public Realtek release,
+# ez_sc.c and ez_wifi_config.c, linked between os_dep/linux/rtw_rhashtable.o and
+# hal/hal_intf.o -- so they were appended to _OS_INTFS_FILES exactly as below.
+# See FINDINGS-oem-catalogue.md.
+CONFIG_EZ_WIFI = y
 CONFIG_RTW_NAPI = y
 CONFIG_RTW_GRO = y
 CONFIG_RTW_NETIF_SG = y
@@ -276,6 +282,15 @@ _OS_INTFS_FILES :=	os_dep/osdep_service.o \
 			os_dep/linux/rtw_proc.o \
 			os_dep/linux/nlrtw.o \
 			os_dep/linux/rtw_rhashtable.o
+
+ifeq ($(CONFIG_EZ_WIFI), y)
+EXTRA_CFLAGS += -DCONFIG_EZ_WIFI
+_OS_INTFS_FILES += os_dep/linux/ez_sc.o
+_OS_INTFS_FILES += os_dep/linux/ez_wifi_config.o
+# ez_wifi_config.c prints its own build time and the shipped module says
+# 20:43:30, three seconds after core/rtw_debug.c's 20:43:27.
+CFLAGS_ez_wifi_config.o += -D__TIME__='"20:43:30"'
+endif
 
 ifeq ($(CONFIG_MP_INCLUDED), y)
 _OS_INTFS_FILES += os_dep/linux/ioctl_mp.o

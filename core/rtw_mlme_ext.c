@@ -16,6 +16,46 @@
 
 #include <drv_types.h>
 #include <hal_data.h>
+/*
+ * OEM (EZVIZ) patch line-count reconciliation.
+ *
+ * The shipped module pins how many lines the vendor added to this file above
+ * collect_bss_info(): its __LINE__ constant is 10582 where the pristine Realtek
+ * v5.15.3 tarball gives 10521, so the vendor's rtw_mlme_ext.c carries exactly
+ * 61 more lines before that point (FINDINGS-driver-config.md).
+ *
+ * Twenty-one of those 61 are recovered from the binary and are in this file:
+ * three for the `int ez_ret;` declaration in OnProbeReq(), fourteen for the
+ * smart-config / EID-208 block that OnProbeReq() runs just before it looks for
+ * the SSID element, and four for the ez_probe_response_eid208_handler() call in
+ * OnProbeRsp().  Every instruction of all three is byte-identical to the
+ * shipped module, so the *code* the vendor added above collect_bss_info() is
+ * fully accounted for.
+ *
+ * The remaining 40 lines emitted no code: comments, blank lines, a different
+ * brace or wrapping style, or edits inside a block this build compiles out.
+ * The binary cannot say which.  They are reproduced here as this comment so
+ * that __LINE__ downstream of it matches the shipped module exactly; that is
+ * the whole of their observable effect.  Do not delete these lines without
+ * adding the same number back somewhere above collect_bss_info().
+ *
+ *   pristine tarball   collect_bss_info() RTW_INFO at line 10521
+ *   shipped module     collect_bss_info() RTW_INFO at line 10582
+ *   this file          must also put it at line 10582
+ *
+ * The same reconciliation is applied, at much smaller scale, to
+ * os_dep/linux/ioctl_linux.c (+2 lines above rtw_wx_set_priv, whose __LINE__
+ * goes 7838 -> 7840) and to core/efuse/rtw_efuse.c (+1 line above both efuse
+ * map writers, 2875 -> 2876 and 3024 -> 3025).  In those two files the vendor's
+ * additions produced no recoverable code at all above the constrained point,
+ * so the whole delta is comment.
+ *
+ * If a later pass recovers real vendor code that belongs above
+ * collect_bss_info(), shrink this comment by the number of lines it adds - the
+ * total above that function is what has to stay at 61, not this block's size.
+ * Verify with:  grep -n 'IE too long (%d) for survey' core/rtw_mlme_ext.c
+ * which must report line 10582.
+ */
 
 struct mlme_handler mlme_sta_tbl[] = {
 	{WIFI_ASSOCREQ,		"OnAssocReq",	&OnAssocReq},
@@ -928,6 +968,9 @@ unsigned int OnProbeReq(_adapter *padapter, union recv_frame *precv_frame)
 	u8 *pframe = precv_frame->u.hdr.rx_data;
 	uint len = precv_frame->u.hdr.len;
 	u8 is_valid_p2p_probereq = _FALSE;
+#ifdef CONFIG_EZ_WIFI
+	int ez_ret;
+#endif
 
 #ifdef CONFIG_ATMEL_RC_PATCH
 	u8 *target_ie = NULL, *wps_ie = NULL;
@@ -1144,6 +1187,20 @@ _non_rc_device:
 	}
 #endif
 
+#ifdef CONFIG_EZ_WIFI
+	if (ez_new_sc.enable && ez_new_sc.done == 0
+	    && (len - WLAN_HDR_A3_LEN) > 255)
+		ez_probe_req_handler(pframe, len);
+
+	ez_ret = ez_probe_requst_eid208_handler(pframe, len);
+	if (ez_ret > 0) {
+		ez_ret = rtw_ezviz_ie_set(padapter, WIFI_PROBERESP_VENDOR_IE_BIT,
+					  (u8 *)&probe_resp_t, probe_resp_t.element_len + 2);
+		printk("rtw_vendor_ie_set,ret:%d!!!\n", ez_ret);
+	} else if (pmlmepriv->vendor_ielen[0])
+		rtw_ezviz_ie_set(padapter, WIFI_PROBERESP_VENDOR_IE_BIT, NULL, 0);
+#endif
+
 	p = rtw_get_ie(pframe + WLAN_HDR_A3_LEN + _PROBEREQ_IE_OFFSET_, _SSID_IE_, (int *)&ielen,
 		       len - WLAN_HDR_A3_LEN - _PROBEREQ_IE_OFFSET_);
 
@@ -1231,6 +1288,10 @@ unsigned int OnProbeRsp(_adapter *padapter, union recv_frame *precv_frame)
 	}
 #endif
 
+
+#ifdef CONFIG_EZ_WIFI
+	ez_probe_response_eid208_handler(pframe, precv_frame->u.hdr.len);
+#endif
 
 	if ((mlmeext_chk_scan_state(pmlmeext, SCAN_PROCESS))
 		|| (MLME_IS_MESH(padapter) && check_fwstate(&padapter->mlmepriv, WIFI_ASOC_STATE))

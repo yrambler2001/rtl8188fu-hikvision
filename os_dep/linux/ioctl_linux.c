@@ -19,6 +19,8 @@
 #include "../../hal/phydm/phydm_precomp.h"
 #ifdef RTW_HALMAC
 #include "../../hal/hal_halmac.h"
+/* OEM (EZVIZ) patch line-count reconciliation: the shipped rtw_wx_set_priv's
+ * __LINE__ is 7840 where the tarball gives 7838. See core/rtw_mlme_ext.c. */
 #endif
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 27))
@@ -13111,6 +13113,44 @@ int rtw_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	int ret = 0;
 
 	switch (cmd) {
+#ifdef CONFIG_EZ_WIFI
+	case EZ_NEW_SMART_CONFIG_IO:
+		printk("EZ_NEW_SMART_CONFIG_IO \n");
+		if (dev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP)
+			ret = ez_new_sc_ioctl(dev, rq, cmd);
+		else
+			ret = EINVAL;
+		break;
+	case EZ_IOCTL_SET_NEW_SC:
+		printk("EZ_IOCTL_SET_NEW_SC \n");
+		if (dev->ieee80211_ptr->iftype == NL80211_IFTYPE_STATION)
+			ret = ez_new_sc_ioctl_handle(dev, rq, cmd);
+		else
+			ret = EINVAL;
+		break;
+	case EZ_IOCTL_SCAN_IO:
+		printk("EZ_IOCTL_SCAN_IO \n");
+		if (dev->ieee80211_ptr->iftype == NL80211_IFTYPE_STATION)
+			ret = ez_scan_device_ioctl_handle(dev, rq, cmd);
+		else
+			ret = EINVAL;
+		break;
+	case EZ_IOCTL_DEVINFO_IO:
+		printk("EZ_IOCTL_DEVINFO_IO \n");
+		ret = ez_device_info_ioctl_handle(dev, rq, cmd);
+		break;
+	case EZ_IOCTL_READ_RSSI_PER_ANT:
+		printk("EZ_IOCTL_READ_RSSI_PER_ANT \n");
+		ret = ez_read_rssi_per_ant_ioctl(dev, rq, cmd);
+		break;
+	case EZ_IOCTL_WIFI_FUNC_POLL:
+		printk("EZ_IOCTL_WIFI_FUNC_POLL \n");
+		ret = ez_wifi_func_poll_ioctl_handle(dev, rq, cmd);
+		break;
+	case EZ_IOCTL_RF_CALIBRATION_CHECK:
+		ret = ez_wifi_module_rf_calibration_check_ioctl(dev, rq, cmd);
+		break;
+#endif /* CONFIG_EZ_WIFI */
 #ifdef CONFIG_IOCTL_WEXT
 	case RTL_IOCTL_WPA_SUPPLICANT:
 		ret = wpa_supplicant_ioctl(dev, &wrq->u.data);

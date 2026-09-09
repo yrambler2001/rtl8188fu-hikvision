@@ -176,6 +176,10 @@ typedef struct _ADAPTER _adapter, ADAPTER, *PADAPTER;
 
 #include <rtw_roch.h>
 
+#ifdef CONFIG_EZ_WIFI
+#include <ez_wifi.h>
+#endif
+
 #define SPEC_DEV_ID_NONE BIT(0)
 #define SPEC_DEV_ID_DISABLE_HT BIT(1)
 #define SPEC_DEV_ID_ENABLE_PS BIT(2)

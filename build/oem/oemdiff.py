@@ -22,7 +22,9 @@ usage:
   build/oem/oemdiff.py --shipped <8188fu.ko> --obj <ez_sc.o> [--obj <..>] [--fn NAME]
   build/oem/oemdiff.py --shipped <8188fu.ko> --catalogue          # dump the catalogue
 """
-import sys, os, struct, bisect, argparse
+import sys, os, re, struct, bisect, argparse
+
+UNIQ = re.compile(r'\.\d+$')   # GCC's local-symbol uniquifier: __func__.71055
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from elf import ELF, STB, STT, OEM_FILES, oem_funcs
@@ -80,9 +82,12 @@ class View:
         return None
 
     def target(self, si, addend):
-        """Symbolic name of relocation <si> with in-place addend."""
+        """Symbolic name of relocation <si> with in-place addend.
+
+        The trailing .NNNN of a GCC local-symbol uniquifier is stripped: it
+        tracks the translation unit's total DECL count, not the code."""
         s = self.e.syms[si]
-        nm = s['name']
+        nm = UNIQ.sub('', s['name'])
         if s['type'] == 3 or not nm:                       # section symbol
             sec = self.e.sh[s['shndx']]['name'] if s['shndx'] < len(self.e.sh) else '?'
             if sec.startswith('.rodata.str'):
@@ -90,7 +95,7 @@ class View:
                 if v is not None:
                     return 'STR:' + repr(v.decode('utf-8', 'replace'))
             r = self.sym_at(sec, addend)
-            return r if r else '%s+0x%x' % (sec, addend)
+            return UNIQ.sub('', r) if r else '%s+0x%x' % (sec, addend)
         return nm + ('+%d' % addend if addend else '')
 
     def bytes_at(self, addr, size):
@@ -111,15 +116,22 @@ class View:
                     ops.append((i, tn, self.e.syms[si]['name']))
                     struct.pack_into('<I', b, i, w & 0xff000000)
                 else:
-                    ops.append((i, tn, self.target(si, w if tn != 'ABS32' else w)))
+                    t = self.target(si, w)
+                    if self.e.syms[si]['type'] == 3 and t.startswith(
+                            self.faddr.get(addr, '\0')):
+                        t = '.+%d' % (w - addr)    # switch table entry
+                    ops.append((i, tn, t))
                     struct.pack_into('<I', b, i, 0)
-            elif (w >> 25) & 7 == 0b101:                   # B/BL, already resolved
+            elif ((w >> 25) & 7) == 0b101:                   # B/BL, already resolved
                 disp = w & 0xffffff
                 if disp & 0x800000:
                     disp -= 0x1000000
                 tgt = off + 8 + disp * 4
-                ops.append((i, 'BL' if (w >> 24) & 1 else 'B',
-                            self.faddr.get(tgt, 'text+0x%x' % tgt)))
+                if addr <= tgt < addr + size:      # branch inside this function
+                    nm = '.+%d' % (tgt - addr)
+                else:
+                    nm = self.faddr.get(tgt, 'text+0x%x' % tgt)
+                ops.append((i, 'BL' if (w >> 24) & 1 else 'B', nm))
                 struct.pack_into('<I', b, i, w & 0xff000000)
         return bytes(b), ops
 

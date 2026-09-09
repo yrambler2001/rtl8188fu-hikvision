@@ -27,15 +27,17 @@ FLAGS=$(head -1 "$CMD" | sed -e 's/^[^=]*:= *//' \
                              -e 's/ -c -o .*$//' \
                              -e 's/-Wp,-MD,[^ ]*//' \
                              -e "s/-D__TIME__='\"[^\"]*\"'//" \
+                             -e "s/-D__DATE__='\"[^\"]*\"'//" \
                              -e 's/-DKBUILD_BASENAME=[^ ]*//' \
                              -e 's/-DKBUILD_MODNAME=[^ ]*//')
 
 mkdir -p "$OUT"
 build() {           # build <basename> <__TIME__>
-    eval set -- "$FLAGS" \
+    B=$1
+    eval set -- "$FLAGS" -Wno-builtin-macro-redefined \
         -DKBUILD_BASENAME='\"'"$1"'\"' -DKBUILD_MODNAME='\"8188fu\"' \
-        -D__TIME__='\"'"$2"'\"'
-    ( cd "$KSRC" && arm-linux-gnueabi-gcc "$@" -c -o "$OUT/$1.o" "$SRC/os_dep/linux/$1.c" )
+        -D__DATE__="'\"Dec 25 2023\"'" -D__TIME__='\"'"$2"'\"'
+    ( cd "$KSRC" && arm-linux-gnueabi-gcc "$@" -c -o "$OUT/$B.o" "$SRC/os_dep/linux/$B.c" )
 }
 
 build ez_sc          20:43:27
