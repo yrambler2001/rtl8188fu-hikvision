@@ -128,13 +128,13 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 		if (buf[i] == '\r')
 			continue;
 
-		if ((pos | n) == 1) {
+		if ((pos | n) | (pos & n)) {
 			if (buf[i] == '\n') {
 				if (n) {
 					n = 0;
-					pos = 0;
+					pos = n;
 				} else {
-					pos = 0;
+					pos = n;
 					end = 0;
 				}
 			}
@@ -142,7 +142,7 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 		}
 
 		if (buf[i] == '#') {
-			n = pos;
+			n = 0;
 			pos = 1;
 			continue;
 		}
@@ -152,8 +152,8 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 			continue;
 		}
 		else if (buf[i] == '\n') {
-			end = pos | n;
-			n |= pos;
+			end = 0;
+			n = 0;
 			pos = 0;
 			continue;
 		}
