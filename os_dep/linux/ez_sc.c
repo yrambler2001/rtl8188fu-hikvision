@@ -82,6 +82,32 @@ int set_scan_flag(int flag)
 	return 0;
 }
 
+/* ---------------------------------------------------------------------------
+ * DECL_UID placeholders.
+ *
+ * GCC appends `.' plus the declaration's DECL_UID to every function-local and
+ * file-scope static symbol, and DECL_UID counts *every* declaration the front
+ * end creates, in source order.  The `__func__.NNNN' symbols the shipped
+ * module carries are therefore an exact statement of how many declarations
+ * the vendor's copy of this file had before each function - and this
+ * reconstruction has fewer.  build/oem/uidgap.py prints the deficit per
+ * interval; FINDINGS-oem-catalogue.md section 11 has the derivation.
+ *
+ * A declaration that emits no code leaves nothing else in the binary, so
+ * *which* declarations those were is not recoverable - only how many, and
+ * between which two functions.  Each `uid_gap' below stands in for exactly
+ * that many declarations at exactly that point.  They are placeholders, not
+ * recovered vendor code: an enum costs one DECL_UID for the type and one per
+ * enumerator, a typedef costs one, and nothing is emitted.  Delete one and
+ * every `__func__.NNNN' after it in this file stops matching.
+ * ------------------------------------------------------------------------ */
+/* check_probe_sync_EID -> rtw_ezviz_ie_set: 10 declarations */
+enum ez_sc_uid_gap_1 {
+	EZ_SC_UID_GAP_1_0, EZ_SC_UID_GAP_1_1, EZ_SC_UID_GAP_1_2,
+	EZ_SC_UID_GAP_1_3, EZ_SC_UID_GAP_1_4, EZ_SC_UID_GAP_1_5,
+	EZ_SC_UID_GAP_1_6, EZ_SC_UID_GAP_1_7, EZ_SC_UID_GAP_1_8
+};
+
 void hexdump(u8 *buf, int len)
 {
 	u8 *p;
@@ -202,6 +228,9 @@ _clear_path:
 	return -EFAULT;
 }
 
+/* rtw_ezviz_ie_set -> ez_new_sc_ioctl_handle: 1 declarations */
+typedef int ez_sc_uid_gap_2_t;
+
 int ez_new_sc_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	_adapter *padapter;
@@ -243,6 +272,11 @@ int ez_new_sc_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cmd)
 
 	return ret;
 }
+
+/* ez_new_sc_ioctl_handle -> ez_device_info_ioctl_handle: 4 declarations */
+enum ez_sc_uid_gap_3 {
+	EZ_SC_UID_GAP_3_0, EZ_SC_UID_GAP_3_1, EZ_SC_UID_GAP_3_2
+};
 
 int ez_device_info_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cmd)
 {
@@ -299,6 +333,11 @@ int check_sn_valid(void)
 }
 
 
+/* ez_device_info_ioctl_handle -> check_probe_sync_eid208: 3 declarations */
+enum ez_sc_uid_gap_4 {
+	EZ_SC_UID_GAP_4_0, EZ_SC_UID_GAP_4_1
+};
+
 int check_probe_sync_eid208(u8 *buf, int len)
 {
 	char sync_code[EZ_SYNC_CODE_LEN + 1] = "EZVIZ";
@@ -317,6 +356,9 @@ int check_probe_sync_eid208(u8 *buf, int len)
 
 	return 0;
 }
+
+/* check_probe_sync_eid208 -> ez_probe_response_eid208_handler: 1 declarations */
+typedef int ez_sc_uid_gap_5_t;
 
 int ez_probe_response_eid208_handler(u8 *pframe, int len)
 {
@@ -345,6 +387,9 @@ int ez_probe_response_eid208_handler(u8 *pframe, int len)
 
 	return offset;
 }
+
+/* ez_probe_response_eid208_handler -> ez_probe_requst_eid208_handler: 1 declarations */
+typedef int ez_sc_uid_gap_6_t;
 
 int ez_probe_requst_eid208_handler(u8 *pframe, int len)
 {
@@ -412,6 +457,19 @@ int ez_probe_req_handler(u8 *pframe, int len)
 
 	return 0;
 }
+
+/* ez_probe_requst_eid208_handler -> ez_scan_device_ioctl_handle: 27 declarations */
+enum ez_sc_uid_gap_7 {
+	EZ_SC_UID_GAP_7_0, EZ_SC_UID_GAP_7_1, EZ_SC_UID_GAP_7_2,
+	EZ_SC_UID_GAP_7_3, EZ_SC_UID_GAP_7_4, EZ_SC_UID_GAP_7_5,
+	EZ_SC_UID_GAP_7_6, EZ_SC_UID_GAP_7_7, EZ_SC_UID_GAP_7_8,
+	EZ_SC_UID_GAP_7_9, EZ_SC_UID_GAP_7_10, EZ_SC_UID_GAP_7_11,
+	EZ_SC_UID_GAP_7_12, EZ_SC_UID_GAP_7_13, EZ_SC_UID_GAP_7_14,
+	EZ_SC_UID_GAP_7_15, EZ_SC_UID_GAP_7_16, EZ_SC_UID_GAP_7_17,
+	EZ_SC_UID_GAP_7_18, EZ_SC_UID_GAP_7_19, EZ_SC_UID_GAP_7_20,
+	EZ_SC_UID_GAP_7_21, EZ_SC_UID_GAP_7_22, EZ_SC_UID_GAP_7_23,
+	EZ_SC_UID_GAP_7_24, EZ_SC_UID_GAP_7_25
+};
 
 int ez_scan_device_ioctl_handle(struct net_device *dev, struct ifreq *rq, int cmd)
 {

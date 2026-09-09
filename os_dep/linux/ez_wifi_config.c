@@ -89,6 +89,30 @@ const u8 invalid_efuse_data2[10] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
+/* ---------------------------------------------------------------------------
+ * DECL_UID placeholders.
+ *
+ * GCC appends `.' plus the declaration's DECL_UID to every function-local and
+ * file-scope static symbol, and DECL_UID counts *every* declaration the front
+ * end creates, in source order.  The `__func__.NNNN' symbols the shipped
+ * module carries are therefore an exact statement of how many declarations
+ * the vendor's copy of this file had before each function - and this
+ * reconstruction has fewer.  build/oem/uidgap.py prints the deficit per
+ * interval; FINDINGS-oem-catalogue.md section 11 has the derivation.
+ *
+ * A declaration that emits no code leaves nothing else in the binary, so
+ * *which* declarations those were is not recoverable - only how many, and
+ * between which two functions.  Each `uid_gap' below stands in for exactly
+ * that many declarations at exactly that point.  They are placeholders, not
+ * recovered vendor code: an enum costs one DECL_UID for the type and one per
+ * enumerator, a typedef costs one, and nothing is emitted.  Delete one and
+ * every `__func__.NNNN' after it in this file stops matching.
+ * ------------------------------------------------------------------------ */
+/* before ez_set_country: 4 declarations */
+enum ez_wifi_uid_gap_1 {
+	EZ_WIFI_UID_GAP_1_0, EZ_WIFI_UID_GAP_1_1, EZ_WIFI_UID_GAP_1_2
+};
+
 int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 {
 	u32 i;
@@ -328,6 +352,11 @@ void ez_set_country(char *country_code)
 	RTW_ERR("##%s :: country_code:%s\n", __func__, country_code);
 }
 
+/* ez_set_country -> ez_wifi_preinit: 4 declarations */
+enum ez_wifi_uid_gap_2 {
+	EZ_WIFI_UID_GAP_2_0, EZ_WIFI_UID_GAP_2_1, EZ_WIFI_UID_GAP_2_2
+};
+
 void ez_wifi_version_info(void)
 {
 	printk("soc platform:%s\r\n", EZ_WIFI_SOC_PLATFORM);
@@ -473,6 +502,12 @@ int ez_hexval(char c)
 
 	return 0;
 }
+
+/* ez_read_rssi_per_ant_ioctl -> ez_get_mac_addr: 6 declarations */
+enum ez_wifi_uid_gap_3 {
+	EZ_WIFI_UID_GAP_3_0, EZ_WIFI_UID_GAP_3_1, EZ_WIFI_UID_GAP_3_2,
+	EZ_WIFI_UID_GAP_3_3, EZ_WIFI_UID_GAP_3_4
+};
 
 int ez_atox(char *s)
 {
@@ -691,6 +726,9 @@ ok:
 	return ret;
 }
 
+/* ez_wifi_func_poll_ioctl_handle -> ez_read_efuse: 1 declarations */
+typedef int ez_wifi_uid_gap_4_t;
+
 int ez_read_efuse(PADAPTER padapter, u16 addr, u16 cnts, u8 *data)
 {
 	if (!data) {
@@ -705,6 +743,11 @@ int ez_read_efuse(PADAPTER padapter, u16 addr, u16 cnts, u8 *data)
 
 	return 0;
 }
+
+/* ez_read_efuse -> ez_wifi_module_rf_calibration_check_ioctl: 3 declarations */
+enum ez_wifi_uid_gap_5 {
+	EZ_WIFI_UID_GAP_5_0, EZ_WIFI_UID_GAP_5_1
+};
 
 int ez_read_efuse_mac(PADAPTER padapter)
 {
