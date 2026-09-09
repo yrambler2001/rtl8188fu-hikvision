@@ -6,10 +6,12 @@ two OEM translation units that are in no public Realtek release.
 
 **Current state: 455 of 1,918,056 bytes differ — 0.024% of the file.**
 Every section except `.text`, `.rel.text`, `.symtab`, `.strtab` and
-`.note.gnu.build-id` is byte-identical; 3,905 of the 3,909 functions in `.text`
-differ in no instruction, and the four that do differ by three ARM instructions
-and two register choices in total — all of it register allocation, none of it
-semantics.
+`.note.gnu.build-id` is byte-identical. Four of the 3,909 functions in `.text`
+differ: one by two ARM instructions, one by one, and two only in which registers
+GCC chose.
+The other 3,905 differ at most in relocated operands and `B`/`BL`
+displacements — link layout, caused by those four moving things — and none of
+the four differs for any semantic reason.
 
 ---
 
@@ -204,8 +206,8 @@ Four functions, all in the reconstructed OEM code, and all register allocation:
 |---|---:|---|
 | `process_config_vars` | +8 (2 insns) | the shipped build spills the `pick` parameter and so has a spare callee-saved register for the `pos \| n` value; ours keeps `pick` in `sl`, which splits `pos` across two registers |
 | `ez_scan_device_ioctl_handle` | +4 (1 insn + 1 pool word) | the shipped build derives `&probe_req_t` from the `.bss` section anchor with an `add`; ours loads it from the literal pool |
-| `ez_strsep` | 80 bytes, right size | one if-conversion and one loop-carried register choice |
-| `ez_new_sc_ioctl` | 20 bytes, right size | a two-allocno tie that IRA breaks the other way |
+| `ez_strsep` | 80 bytes, right size | one if-conversion, and an out-of-SSA coalescing choice: `q = p; c = *p++;` makes `q` the loop PHI's own value, so exactly one of `{PHI, p+1}` and `{PHI, q}` can be coalesced and GCC picks the other one |
+| `ez_new_sc_ioctl` | 20 bytes, right size | an IRA preference tie: `rq` and `is_null` both prefer `r1` at weight 2000 and cancel, but `rq` has an extra uncontested weight-125 preference for `r2` from the `add r2, rq, #16` that sets up the third argument |
 
 plus 16 `__func__` uniquifiers in the two OEM files, whose gap arithmetic says
 the vendor's sources declare 65 more locals than ours — declarations that emit
