@@ -1,0 +1,64 @@
+#!/bin/sh
+# Copy the bind-mounted vendor kernel tree into the container and run
+# `modules_prepare` on it, so out-of-tree modules can be built against it.
+#
+# We only need headers + Module.symvers machinery, not a bootable kernel.
+set -e
+
+VENDOR_SRC="${VENDOR_SRC:-/vendor-src}"
+KSRC="${KSRC:-/build/linux-vendor}"
+DEFCONFIG="${VENDOR_DEFCONFIG:-fh8856v200_defconfig}"
+: "${HOSTCFLAGS:=-Wall -O2 -fomit-frame-pointer -std=gnu89 -fcommon}"
+
+# GCC 10+ host tools: 4.9's scripts/ assume -fcommon and gnu89. Keep HOSTCFLAGS
+# a single quoted word so `make` sees one argument.
+kmake() {
+    make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- HOSTCFLAGS="$HOSTCFLAGS" "$@"
+}
+
+if [ ! -d "$VENDOR_SRC/arch/arm/mach-fh" ]; then
+    echo "!! $VENDOR_SRC does not look like the Fullhan tree (no arch/arm/mach-fh)" >&2
+    exit 1
+fi
+
+if [ ! -d "$KSRC" ]; then
+    echo "== copying $VENDOR_SRC -> $KSRC (752 MB, takes a minute)"
+    mkdir -p "$KSRC"
+    tar -C "$VENDOR_SRC" --exclude=.git -cf - . | tar -C "$KSRC" -xf -
+fi
+
+cd "$KSRC"
+
+# ---------------------------------------------------------------------------
+# Retarget the board from ARMv6 to ARMv7.
+#
+# This BSP drop ships exactly one board choice, ARCH_FH885xV200, and it does
+# `select CPU_V6`. All 12 defconfigs therefore compile with -march=armv6 /
+# -D__LINUX_ARM_ARCH__=6 and stamp vermagic "ARMv6".
+#
+# The camera in hand is an FH865x (Cortex-A7), and the shipped 8188fu.ko says
+# "4.9.129 mod_unload ARMv7 p2v8". arch/arm/mach-fh/pmu.c references
+# CONFIG_ARCH_FH865x, but no Kconfig in this tree defines it - the FH865x board
+# entry lives in a sibling Fullhan BSP drop we do not have. Everything else in
+# mach-fh (FULLHAN_INTC, FULLHAN_TIMER, the FH_* drivers) is shared.
+#
+# So flip the one `select`. Consequences, all of them wanted:
+#   -march=armv7-a, __LINUX_ARM_ARCH__=7          (matches the shipped codegen)
+#   vermagic "ARMv7"                              (matches .modinfo)
+#   ARM_L1_CACHE_SHIFT_6 "default y if CPU_V7"    (64-byte ____cacheline_aligned)
+# Set VENDOR_CPU_V7=0 to skip and reproduce the stock-BSP ARMv6 numbers.
+if [ "${VENDOR_CPU_V7:-1}" = 1 ]; then
+    perl -0pi -e 's/(config ARCH_FH885xV200\n\s*bool "Fullhan FH885xV200"\n\s*select )CPU_V6\n/${1}CPU_V7\n/' \
+        arch/arm/mach-fh/Kconfig
+    grep -A2 '^config ARCH_FH885xV200' arch/arm/mach-fh/Kconfig
+fi
+
+echo "== $DEFCONFIG"
+kmake "$DEFCONFIG"
+echo "== modules_prepare"
+kmake -j"$(nproc)" modules_prepare
+
+echo "== sanity"
+grep -E '^CONFIG_(WIRELESS_EXT|WEXT_CORE|WEXT_PRIV|WEXT_SPY|CFG80211|SMP|PREEMPT_NONE|CPU_V6|CPU_V7|ARM_L1_CACHE_SHIFT|THUMB2_KERNEL|ARM_PATCH_PHYS_VIRT|MODULE_UNLOAD|CC_OPTIMIZE_FOR_SIZE|KALLSYMS|FH_CHIP_NAME)=' .config || true
+echo "-- vermagic:"
+cat include/generated/utsrelease.h

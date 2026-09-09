@@ -1,0 +1,39 @@
+# Build environment that compiles 8188fu.ko against the *vendor* kernel tree
+# (Fullhan FH865X Linux 4.9.129) instead of the kernel.org 4.9.129 used by
+# build/Dockerfile.
+#
+# The vendor tree is 752 MB, so it is NOT baked into the image. It is bind-mounted
+# read-only at /vendor-src, and prepare-vendor-kernel.sh copies it to
+# /build/linux-vendor inside the container before configuring it. That keeps the
+# pristine host tree untouched (kbuild writes .config, autoconf.h, generated/*,
+# scripts/ host binaries, ... all over the source dir).
+#
+# Everything else - Debian bullseye, GCC 6.5.0 arm-linux-gnueabi (soft-float,
+# nolibc) from kernel.org crosstool - is inherited from rtl8188fu-build:latest,
+# which build/Dockerfile produces.
+#
+#   docker build -f build/Dockerfile.vendor -t rtl8188fu-build-vendor:latest build/
+#   docker run -d --name fuv \
+#       -v "$PWD":/src \
+#       -v /path/to/linux-4.9.129-fullhan-pristine:/vendor-src:ro \
+#       rtl8188fu-build-vendor:latest sleep infinity
+#   docker exec fuv sh /build/prepare-vendor-kernel.sh
+#   docker exec fuv sh /src/build/build-vendor.sh
+FROM rtl8188fu-build:latest
+
+# GCC 10+ on the host side defaults to -fno-common, which breaks 4.9's host tools
+# (scripts/dtc, scripts/kconfig). -std=gnu89 -fcommon restores 4.9's assumptions.
+ENV HOSTCFLAGS="-Wall -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
+ENV ARCH=arm
+ENV CROSS_COMPILE=arm-linux-gnueabi-
+
+# The vendor tree ships 12 defconfigs (fh885{2,6,8}v2{0,1}0[_of]). They differ only
+# in CONFIG_FH_CHIP_NAME / CONFIG_MACH_* and produce an identical module ABI, so any
+# of them serves. fh8856v200 is the FH865X part in this camera.
+ENV VENDOR_DEFCONFIG=fh8856v200_defconfig
+ENV VENDOR_SRC=/vendor-src
+ENV KSRC=/build/linux-vendor
+
+COPY prepare-vendor-kernel.sh /build/prepare-vendor-kernel.sh
+
+WORKDIR /src

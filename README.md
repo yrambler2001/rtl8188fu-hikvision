@@ -55,9 +55,14 @@ Byte-exact for the whole module is not reachable (see below), but with the
 | `vermagic` | **exact match** — `4.9.129 mod_unload ARMv7 p2v8` |
 | ARM ELF attributes | **identical** (all 15 tags) |
 | compiled source files | **157 / 159** (missing only the two OEM files) |
-| function symbols present | **3817 / 3939 = 96.9%** |
-| same-size functions | **3038 / 3817 = 79.6%** |
-| **byte-identical functions** | **2181 = 55.4% of the module, 37.0% of `.text`** |
+| function symbols present | **3872 / 3939 = 98.3%** |
+| same-size functions | **3497 / 3872 = 90.3%** |
+| **byte-identical functions** | **2570 = 65.2% of the module, 43.4% of `.text`** |
+| module size | 1,904,016 vs 1,918,056 shipped (−0.7%) |
+
+Those figures are against the **Fullhan vendor kernel** (`build/Dockerfile.vendor`,
+`FINDINGS-vendor-kernel.md`). Against a stock kernel.org 4.9.129 the same source
+gives 3817 symbols / 3038 same-size / 2181 byte-identical (55.4%).
 
 "Byte-identical" masks two things that encode link layout rather than code:
 relocated operands, and ARM `B`/`BL` displacements the assembler resolved
@@ -94,9 +99,10 @@ differing instruction words classify as:
 | 9.7% | `ldr`/`str`, other field |
 
 A load/store that differs *only* in its immediate offset is a struct field at a
-different offset. That is the signature of **different kernel headers** — the
-vendor's patched 4.9.129 tree and its `.config`. Fixing the compiler moved the
-bottleneck from barrier 2 to barrier 3.
+different offset. That was the signature of **different kernel headers** — the
+vendor's patched 4.9.129 tree and its `.config`. Building against that tree removed
+every kernel-header offset family; what survives is a single driver-side one, a
++1312-byte `struct mlme_priv`. See `FINDINGS-vendor-kernel.md`.
 
 ## Recovered vendor build settings
 
