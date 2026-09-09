@@ -54,7 +54,7 @@ path and timestamp (`build/build-vendorpath.sh`), and a GCC 6.5.0 rebuilt with t
 
 With the exact compiler, the exact kernel, the recovered `#ifdef` set, the vendor's
 own build path and the two reconstructed OEM translation units, the module now
-reproduces to within **0.068%**.
+reproduces to within **0.051%**.
 
 | metric | result |
 |---|---|
@@ -63,9 +63,9 @@ reproduces to within **0.068%**.
 | `.modinfo` | **byte-identical** (9,246 bytes: params, descriptions, alias, version) |
 | compiled source files | **159 / 159** — the two OEM files are reconstructed (`FINDINGS-oem-catalogue.md`) |
 | function symbols | **3909 / 3909**, none missing, none extra |
-| same-size functions | **3901 / 3909** |
-| **whole file** | **1,296 of 1,918,056 bytes still differ (0.068%)** |
-| byte-identical sections | **34 / 41**, including `.rodata.str1.1`, `.rodata`, `.data`, `.bss`, `.comment`, `.strtab` and eleven of the twelve relocation sections |
+| same-size functions | **3903 / 3909** |
+| **whole file** | **972 of 1,918,056 bytes still differ (0.051%)** |
+| byte-identical sections | **34 / 41**, including `.rodata.str1.1`, `.rodata`, `.data`, `.bss`, `.comment`, `.strtab`, `.ARM.exidx` and eleven of the twelve relocation sections |
 | what is left | nine OEM functions differing only by register allocation or block ordering, one 4-byte public residual, and the build-id hash |
 
 Those figures are against the **Fullhan vendor kernel** (`build/Dockerfile.vendor`,

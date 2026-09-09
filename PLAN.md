@@ -6,8 +6,8 @@ Reference: `/path/to/8188fu.ko`, 1,918,056 bytes,
 Measurement:
 
 * `build/fulldiff.py <shipped> <rebuilt>` - whole-file scoreboard, every section, the
-  symbol table, the relocations and the string tables. Current: **1,296 bytes still
-  differ (0.068% of the file)**, and **34 of 41 sections are byte-identical**; see
+  symbol table, the relocations and the string tables. Current: **972 bytes still
+  differ (0.051% of the file)**, and **34 of 41 sections are byte-identical**; see
   `FINDINGS-oem-catalogue.md`, `FINDINGS-byte-gap.md` and `FINDINGS-toolchain.md`.
 * `build/offsetdiff.py <shipped> <rebuilt>` - per-instruction operand diff of `.text`.
 * `build/oem/run.sh`, `build/oem/pub.sh` - the WP-D loop: compile only the two OEM
@@ -47,10 +47,11 @@ Measurement:
   split. Both files, their nine `.bss` and eight `.data` objects, all 115 strings, and
   the four public call sites (`rtw_ioctl`, `OnProbeReq`, `OnProbeRsp`,
   `rtw_usb_primary_adapter_init`) are reconstructed and wired in behind `CONFIG_EZ_WIFI`.
-  **28,368 -> 1,296 bytes**; `.rodata.str1.1`, `.rodata`, `.data`, `.bss`, `.comment`,
-  `.strtab` and eleven of twelve relocation sections are now byte-identical. Nine OEM
-  functions still differ, all by register allocation or block ordering; the catalogue
-  lists each one and what is known about it.
+  **28,368 -> 972 bytes**; `.rodata.str1.1`, `.rodata`, `.data`, `.bss`, `.comment`,
+  `.strtab`, `.ARM.exidx` and eleven of twelve relocation sections are now
+  byte-identical, and `.symtab` has the right size and no missing or extra symbol. Nine
+  OEM functions still differ, all by register allocation or block ordering; the
+  catalogue lists each one and what is known about it.
 - **WP-F** build GCC 6.5.0 with `--with-pkgversion='arm_multilib_uclibc_20200924'`
   *(done - `FINDINGS-toolchain.md`)*. `build/build-gcc-vendor.sh` rebuilds it from the FSF
   tarball with the kernel.org crosstool's own configure options plus that one string; no
