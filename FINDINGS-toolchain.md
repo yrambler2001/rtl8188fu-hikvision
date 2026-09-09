@@ -1,4 +1,9 @@
-# The vendor toolchain
+# Barrier 1: the vendor toolchain
+
+> **Status: closed**, and the module now reproduces byte for byte. This note is
+> the record of the work package that identified and rebuilt the compiler; its
+> byte counts are that pass's, not the current state. `README.md` §4 has the
+> final accounting.
 
 The shipped module's `.comment` section says the compiler was
 
@@ -344,8 +349,9 @@ accounted for: 46 absent OEM functions, four `__LINE__` constants that measure t
 patch, four call sites into OEM code, and the three residuals in `FINDINGS-byte-gap.md`. A
 compiler carrying backported ARM patches would not land on that. So whatever recipe
 assembled `arm_multilib_uclibc_20200924`, on this code at `-Os` for ARMv7 it behaves as
-stock GCC 6.5.0, and any residual difference has nowhere left to hide - the OEM sources are
-now the only thing between us and a byte-exact file.
+stock GCC 6.5.0, and any residual difference had nowhere left to hide - at the end of this
+work package the OEM sources were the only thing between the rebuild and a byte-exact file,
+and closing them is what produced one.
 
 ## 7. Re-running
 

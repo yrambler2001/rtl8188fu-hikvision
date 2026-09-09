@@ -1,4 +1,9 @@
-# Barrier: the driver's own `#ifdef` configuration
+# Barrier 3: the driver's own `#ifdef` configuration
+
+> **Status: closed**, and the module now reproduces byte for byte. This note is
+> the record of the work package that recovered the configuration; its numbers
+> are that pass's, not the current state. `README.md` §3.3 lists the settings as
+> they now stand and §4 has the final accounting.
 
 WP-C asked for one number: the `#ifdef` that makes `sizeof(struct mlme_priv)` equal 4168
 instead of our 2856. It is **`CONFIG_APPEND_VENDOR_IE_ENABLE`**, and it is exact - not

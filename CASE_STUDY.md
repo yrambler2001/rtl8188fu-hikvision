@@ -1,13 +1,18 @@
-# Case study — reproducing a vendor's `8188fu.ko` byte for byte, and the oracles that got to 99.9937%
+# Case study — reproducing a vendor's `8188fu.ko` byte for byte, and the oracles that got there
 
 > **What this is.** An account of the reproduction of a Realtek `8188fu.ko` Linux kernel module
 > pulled from a Hikvision IP camera, from a public driver tarball and nothing else — no vendor
-> source, no vendor toolchain, no kernel `.config`, no build log. It is **not** a closure report:
-> the module is **not** byte-identical. 121 of 1,918,056 bytes still differ, in three functions and
-> one hash that covers them. This document is about the parts a reader could not easily have worked
+> source, no vendor toolchain, no kernel `.config`, no build log. The rebuilt module is
+> byte-identical to the shipped one — all 1,918,056 bytes, `cmp` silent, from a clean
+> `git archive` of HEAD. This document is about the parts a reader could not easily have worked
 > out themselves — the oracles that convert a stripped binary into exact numeric constraints on a
 > build configuration, the counting arguments that bound what is missing, the `-Os` codegen rules
-> the work had to derive, and the traps that made two harnesses report success over real errors.
+> the work had to derive, the compiler decisions the last three functions came down to, and
+> the traps that made two harnesses report success over real errors.
+>
+> Byte-exactness is a statement about the *object code*. The source that produces it is not the
+> vendor's text and cannot be shown to be, and several constructs in it were chosen for the
+> compiler rather than for a reader; §12 says which, and what the binary is still silent about.
 >
 > Per-barrier detail lives in `FINDINGS-hardware.md`, `FINDINGS-vendor-kernel.md`,
 > `FINDINGS-driver-config.md`, `FINDINGS-byte-gap.md`, `FINDINGS-toolchain.md` and
@@ -19,10 +24,10 @@
 ## 1. The result
 
 ```
-whole file        1,918,056 bytes;  121 differ positionally  (99.9937% identical)
-                  203 by the shift-tolerant "structural" count
-sections          39 of 41 byte-identical
-symbols           every FUNC symbol at the shipped address with the shipped size
+whole file        1,918,056 bytes;  0 differ.  `cmp` is silent
+                  a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13, both files
+sections          41 of 41 byte-identical
+symbols           3,909 FUNC symbols, every one at the shipped address with the shipped size
 .strtab           byte-identical, 124,098 bytes, 879/879 DECL_UID uniquifiers matched
 ```
 
@@ -36,23 +41,30 @@ source     the public rtl8188fu tarball, plus two OEM translation units
            (46 functions, ~9.6 KB of .text) reconstructed from Hex-Rays output
 ```
 
-The residual, and what each of the three functions is blocked on:
+`build/verify.sh` reproduces that from a clean `git archive` of HEAD, builds the export twice to
+show that nothing in the build is non-deterministic, and asserts the hash; CI runs the same script
+on every push. A `cmp` of two 1,918,056-byte files cannot be fooled by a masking rule, which makes
+it a different kind of claim from every scoreboard number below it (§8).
 
-| | bytes | words differing | edit distance | the deciding pass |
-|---|---:|---:|---:|---|
-| `process_config_vars` | 79 | 44 of 86 | 5 | `uncprop` + out-of-SSA coalescing; and VRP eliding a cmov pair |
-| `ez_new_sc_ioctl` | 17 | 5 of 14 | 2 | one `assign_hard_reg` tie decided by a weight-125 shuffle copy |
-| `ez_strsep` | 6 | 4 of 39 | 2 | TER sinking `q + 1`, then `auto_inc_dec` fusing it |
-| `.note.gnu.build-id` | 19 | | | an SHA-1 over the linked output |
+The last four to close, and the decision each came down to:
 
-The build-id is derivative: it closes when the other 102 bytes close, and is not independent work.
-All three functions are the **right size** and at the **right address**; the edit distance is the
-register-blanked instruction distance, so what remains is a register-allocation and
-statement-placement problem, not a structural one.
+| | bytes | the deciding pass | what closed it |
+|---|---:|---|---|
+| `process_config_vars` | 79 | `tree-ssa-dom` on the `m` cstore; `uncprop` and out-of-SSA coalescing on the `pos` tail; IRA's colouring order on three registers | a `_Bool` flag with an explicit `& 1`, one shared `pos = 0` behind a barrier that uses it, and three reference devices |
+| `ez_new_sc_ioctl` | 17 | one `assign_hard_reg` tie decided by a weight-125 shuffle copy — and, before it, by IRA's colouring order | two empty `asm`s, which are two more RTL references to `is_null` |
+| `ez_strsep` | 6 | TER sinking `q + 1`, then `auto_inc_dec` fusing it into a post-increment | a store TER will not move an expression across |
+| `.note.gnu.build-id` | 19 | an SHA-1 over the linked output | the other 102 bytes |
 
-The arc, from the commit log (59 commits): 37,630 → 28,368 (vendor `pkgversion`) → 1,296 → 972 →
-455 → 348 → 96 → 56 bytes of OEM `.text`, then a whole-file recount that exposed 1,421 (§8 below),
-→ 141 → 126 → **121**.
+The build-id was always derivative: it closed by itself when the rest did, and was never
+independent work. All three functions were the **right size** and at the **right address** long
+before they were right — the edit distance the search was steered by is the register-blanked
+instruction distance — so what was left at the end was a register-allocation and
+statement-placement problem, not a structural one. §10 is each of the three in full.
+
+The arc, from the commit log (72 commits to `BYTE-EXACT: 8188fu.ko reproduces bit for bit`):
+37,630 → 28,368 (vendor `pkgversion`) → 1,296 → 972 → 455 → 348 → 96 → 56 bytes of OEM `.text`,
+then a whole-file recount that exposed 1,421 (§8 below), → 141 → 126 → 121 → 116 → 99 → 65 → 57
+→ **0**.
 
 ---
 
@@ -455,6 +467,26 @@ Two measurement traps, recorded because each cost real time:
 Both maskings are necessary for the tools to be usable at all, and both must be listed explicitly
 somewhere, because a field masked by every checker is verified nowhere.
 
+### 8.2 The same shape once more, from the other side
+
+The last time this bit, no masking rule was involved at all. `build/oem/run.sh` reported **46 of
+46 OEM functions byte-identical** while the linked module still differed by 37 bytes in
+`process_config_vars`, because the harness and the real build are *different compiles*: `run.sh`
+compiles the two OEM translation units into a scratch directory with the flags lifted from the
+last real build's `.rtw_mlme.o.cmd` and the include paths rewritten, while `build-vendorpath.sh`
+copies the whole tree to the vendor's absolute path and builds it there. The two agree in
+practice, which is what makes the harness worth having, but "the harness says byte-identical" is a
+statement about a *different object file*, and only a full build settles it.
+
+Both traps are now covered by standing checks rather than by discipline.
+`FINDINGS-oem-catalogue.md` §22 enumerates every field each tool masks and names the check that
+covers it, and the audit was tested the only way an audit can be — by reverting the §8 placement
+fix and rebuilding. Both symbolic verdicts stayed exactly as they had been; the positional RAW
+count went 116 → 519 and the byte-identical section count 39 → 34. **A check that has never been
+observed to fire is not yet a check.** For the second trap the covering check is `build/verify.sh`,
+which exports HEAD, builds it twice, asserts the SHA-256 and `cmp`s the result, and which CI runs
+on every push — so a per-function verdict can no longer be the last word on anything.
+
 ---
 
 ## 9. Reproducing the vendor's bugs is not optional
@@ -479,18 +511,35 @@ reconstructed source would otherwise assume they are transcription errors and "f
 
 ---
 
-## 10. The three that remain, and exactly what decides each
+## 10. The last three, and exactly what decided each
 
-Each is one named GCC decision. None is a structural error.
+Each came down to one named GCC decision, read out of the compiler's own source and confirmed in
+its own dump rather than inferred. None was a structural error, and none was reachable by
+respelling: about 100,000 semantically-neutral variants went through `build/oem/gen.py` and
+`build/oem/lab.py` for these three functions, and the sweeps in §11 are what that negative result
+looks like written down.
 
-**`process_config_vars` — 79 bytes, 44 of 86 words, edit distance 5.** Two mechanisms.
-`uncprop` rewrites all seven main-path `pos = 0` PHI arguments into the guard temp, and out-of-SSA's
-coalesce costs accumulate **per edge**, so seven beats `pos`'s own two: the temp is coalesced into
-`pos`'s partition, the `orr` writes `pos`'s register, and `pos` needs a second register plus a latch
-copy — a `b`, a `mov` and a latch `mov`. Separately, the shipped build materialises `m` with a dead
-`moveq #1` / `movne #0` pair where the reconstruction branches straight to the shared `m = 1`,
-because VRP proves the flag is 1 on the taken edge. Note the symmetry with §7: the *same* pass
-(`uncprop`) that closed `ez_set_new_sc` by firing is what keeps this function open by firing.
+**`ez_strsep` — 6 bytes, 4 of 39 words, edit distance 2.** A three-pass chain, each step confirmed
+in its own dump. TER (`tree-ssa-ter.c`, run inside `expand`) replaces an expression into its use
+when `ssa_is_replaceable_p` holds, which requires `single_imm_use`; `t = q + 1` is used once, by
+`*stringp = t`, so **the add is emitted at the store no matter which order the source writes them
+in** — `-fdump-rtl-expand` shows insn 76 `mem(p_110) = 0` then insn 77 `t_129 = p_110 + 1`. Then
+`auto_inc_dec` scans each block backwards, `find_inc` looks only for an inc *after* the memory
+reference (FORM_POST_ADD), finds it, and `try_merge` prices the pair at 8 against 8 —
+`old_cost < new_cost` is false on a tie, so it fires and the store becomes `strb r3, [r4], #1`.
+The rest pointer is then in `q`'s own register, so the two `*stringp` stores are different
+instructions and cross-jumping cannot merge them, where the shipped code branches to the *same*
+`str r3, [r7]` the end-of-string path uses.
+
+What closed it was denying TER the sink, not `auto_inc_dec` the fusion (§11.9 and §11.12).
+`find_replaceable_in_bb` abandons a tracked expression as soon as the statement that *uses* it has
+volatile operands, so writing the rest-pointer store as `*(char * volatile *)stringp = r` keeps the
+add in front of the NUL store. `auto_inc_dec` then has nothing after the memory reference to fold,
+`q` is still live at the store and so cannot share a register with `q + 1`, and cross-jumping
+merges the two stores into the shipped one. The qualifier does not survive to the output — the
+surviving store is the non-volatile one from the end-of-string path — which is exactly the point:
+what the binary states is the *property* that the vendor's build did not sink the add, not the
+spelling that produced it. A `goto` to a mid-loop label reproduces the same bytes.
 
 **`ez_new_sc_ioctl` — 17 bytes, 5 of 14 words, edit distance 2.** One IRA tie, printed in full by
 `-fira-verbose=9`:
@@ -510,16 +559,77 @@ weight-125 preference for r2, created by `ira-conflicts.c`'s `process_reg_shuffl
 costing `mov r2, r1` at the top. The shipped build does the opposite. Both are eight instructions;
 only the assignment differs.
 
-**`ez_strsep` — 6 bytes, 4 of 39 words, edit distance 2.** A three-pass chain, each step confirmed
-in its own dump. TER (`tree-ssa-ter.c`, run inside `expand`) replaces an expression into its use
-when `ssa_is_replaceable_p` holds, which requires `single_imm_use`; `t = q + 1` is used once, by
-`*stringp = t`, so **the add is emitted at the store no matter which order the source writes them
-in** — `-fdump-rtl-expand` shows insn 76 `mem(p_110) = 0` then insn 77 `t_129 = p_110 + 1`. Then
-`auto_inc_dec` scans each block backwards, `find_inc` looks only for an inc *after* the memory
-reference, finds it, and `try_merge` prices the pair at 8 against 8 — `old_cost < new_cost` is false
-on a tie, so it fires. The value is then in `q`'s own register, so the two `*stringp` stores are
-different instructions and cross-jumping cannot merge them, where the shipped code branches to the
-*same* `str r3, [r7]` the end-of-string path uses.
+The 125 only decides anything because `rq` is coloured **first**, and that turns out to be a
+counting problem. `assign_hard_reg` runs in the order `push_allocnos_to_stack` unwinds, which is
+`bucket_allocno_compare_func`'s sort, whose first key is `ALLOCNO_FREQ` — and `REG_FREQ_FROM_BB`
+returns the constant `REG_FREQ_MAX` = 1000 whenever `optimize_function_for_size_p`, so at `-Os`
+**`ALLOCNO_FREQ` is exactly 1000 times the number of times the pseudo appears in the RTL**. `rq`
+appears three times (the parameter copy, the null test, the address add) and `is_null` twice (the
+cstore that defines it, the argument move); the allocno with *fewer* references sorts to the head,
+is pushed first, and is therefore coloured last. Give `is_null` two more references and the whole
+thing reverses: `is_null` is coloured first, its own hr1@2000 is cancelled by `rq`'s — still
+unassigned — so every profitable register costs the same and it takes the first in ARM's
+`REG_ALLOC_ORDER` that does not conflict, r3; `rq` is then coloured with no unassigned conflicting
+neighbour left, keeps r1 unopposed, and the assignment is the shipped one.
+
+Two `__asm__ __volatile__("" :: "r"(is_null))` after the guard are those two references. They emit
+nothing. Equality is not enough — with three each the tie-break leaves the order as it was — and
+placement is load-bearing: the same statements *before* the guard cost four bytes, and an `"+r"`
+form, which also redefines the value, costs eight.
+
+**`process_config_vars` — 79 bytes, 44 of 86 words, edit distance 5.** Three decisions in three
+different passes, in a 344-byte function whose instruction *sequence* was already the vendor's.
+
+*The `m` cstore is `tree-ssa-dom.c`, not VRP.* The shipped build materialises
+`m = (pick[j-1] == ' ' && buf[i] == ' ')` as 0/1 with a conditional-move pair and then branches on
+the same flags; the `movne r7, #0` half is dead, so the pair exists only because the live half is
+carried by the loop PHI as an SSA name rather than as the constant 1. `-fno-tree-vrp` leaves that
+argument at 1, and so do `-fno-ssa-phiopt`, `-fno-tree-forwprop`, `-fno-tree-ccp` and
+`-fno-tree-sink`. The pass that folds it is DOM: `record_edge_info` has a special case for a branch
+on a name with a boolean range — it records `x == 1` on the true edge of `if (x != 0)` when
+`ssa_name_has_boolean_range (x)` — and `cprop_into_successor_phis` then applies that equivalence to
+PHIs in *non-dominated* blocks, which its own comment says it does deliberately.
+`ssa_name_has_boolean_range` is true for a `BOOLEAN_TYPE`, for any type of precision 1, **and for
+an integral type whose `get_nonzero_bits` is 1** — which is precisely what a materialised `&&` is.
+So no `int` spelling escapes it, and none of the ones tried did: `&` for `&&`, `!!`, `? 1 : 0`,
+`u8`, `short`, a `long long` intermediate copied into `m`, `-(cond)`, `(a) * (b)`, the flag written
+in both arms of the enclosing `if`, and the condition written twice so FRE unifies it. What escapes
+it is the **type of the PHI**: with `_Bool m` the argument stays an SSA name and the cstore
+survives, byte for byte. `_Bool` then costs the other half of the pattern, because `m & 1` on a
+`_Bool` gimplifies to a no-op conversion and GCC splits the comparison into two branches; writing
+the guard as `(end == 0) & (m & 1)` keeps a real `BIT_AND_EXPR`, and with it the shipped
+`andeq r3, r7, #1`.
+
+*The shared `pos = 0` has to be one statement, and the barrier has to come after it.* `uncprop`
+rewrites all seven main-path `pos = 0` PHI arguments into the guard temp, and out-of-SSA's coalesce
+costs accumulate **per edge** — `add_coalesce` adds, it does not take a maximum — so seven beats
+`pos`'s own two, and the expand dump prints the verdict as `pos_5 & _32 : Success` beside
+`pos_5 & pos_6 : Fail due to conflict`. The temp lands in `pos`'s partition, the `orr` writes
+`pos`'s register, and `pos` needs a second register plus a latch copy. Note the symmetry with §7:
+the *same* pass (`uncprop`) that closed `ez_set_new_sc` by firing is what held this function open by
+firing — and the fix was not to block it but to remove the seven arguments it had to work on.
+Blocking it directly, by giving the guard a type `gimple_can_coalesce_p` refuses, fixes the
+registers and breaks the layout instead: the seven copies become real blocks, and
+`reorder_basic_blocks_simple` — which at `-Os` does not sort at all, but walks the block chain
+handing each tail to the *first* single-successor predecessor it meets — then gives the loop tail
+to the guard-true arm. The way out is neither: write the tail once. A bare `goto` is not enough
+either, because `pos = 0` is then DCE'd into the PHI argument, the block becomes an empty forwarder,
+and `cleanup_cfg` deletes it, putting the copy back on all six edges. What keeps the block is a
+real **use** of the stored value, which is what an `asm` that reads `pos` back provides. And it has
+to come *after* the store: `can_replace_by` in `cfgcleanup.c` accepts two sets of the same
+destination when one source is a `CONST_INT` and the other carries an equal `REG_EQUAL` — which is
+exactly the guard-true arm's own copy — so with the `asm` last the block's final insn is an
+`ASM_OPERANDS`, `old_insns_match_p` rejects the pair on its first `GET_CODE` test, and the arm
+keeps its own `movne r6, #0` / `movne r2, r6` as shipped.
+
+*Three registers on the reference count.* With `build/oem/align.py` reporting edit distance 0 over
+all 86 instructions, all that was left was which register each local got — `ez_new_sc_ioctl`'s rule
+again, one function up. `end` has to out-count `j` to be coloured before it, and the guard temp has
+to out-count `buf`, whose thread carries an argument-register copy worth 4000. Three more empty
+`asm`s, each placed where the value it names is already live so that nothing else moves, supply the
+references. Placement is not free here either: the same `asm` one statement earlier reorders
+`cmp r1, #35` and `str r3, [sp, #12]`, and one statement later costs an instruction. Seven
+placements were compiled; two give zero.
 
 ---
 
@@ -546,15 +656,17 @@ different instructions and cross-jumping cannot merge them, where the shipped co
    the third argument, seven types for the flag, four spellings of the null test, guard clause vs
    `if`/`else` vs a `ret` variable vs `goto`, passing a literal `0` instead of the flag (identical
    code), computing the address before and after the branch, a `static` helper, and
-   `unlikely()`/`__builtin_expect`. None moves the tie. Roughly 70,000 generated variants went
-   through the search harness for the three remaining functions in total.
+   `unlikely()`/`__builtin_expect`. None moves the tie, and `unlikely()` provably cannot: at `-Os`
+   `REG_FREQ_FROM_BB` is a constant, so a reference in the cold error arm and one on the hot path
+   contribute identically — not "not enough", but not at all.
 7. **`ez_strsep`'s spelling sweep — also clean.** Ruled out, all compiled and scored: store order
    both ways; a named temporary; `p = q + 1` before or after; `*q++ = '\0'`; `*stringp = ++q`;
    `q += 1`; `&q[1]`; `q + sizeof(char)`; a cast through `unsigned long`; `(*stringp)++`; four ways
    of carrying the walk pointer; `char` and `u8` for the character; `for(;;)` and `while(1)`. The
    two that *do* block TER both break something else: advancing `p` before the delimiter test
    removes the add entirely, and breaking out to a single `*stringp = r` after the loop puts the
-   epilogue at the end of the function instead of at offset 64.
+   epilogue at the end of the function instead of at offset 64. What the sweep left behind was not
+   a spelling of the expression at all but a property of the statement that *uses* it (§10).
 8. **`process_config_vars`'s guard sweep.** Ruled out: `(pos | n) == 1` and `> 0` (block the
    assertion but need a separate `cmp`); `(int)`, `(s32)`, `(u32)` casts and a temporary of another
    type (`c_common_truthvalue_conversion` strips a widening `NOP_EXPR`, and TER folds the temporary
@@ -570,6 +682,33 @@ different instructions and cross-jumping cannot merge them, where the shipped co
     reachable only through `check_probe_sync_EID`, so `.text` does not move, but it changes which
     `.LANCHOR` offsets `check_sn_valid` uses for `DeviceInfo` and `null_sn`, and the function stops
     matching.
+11. **"`process_config_vars`'s cmov pair dies because VRP proves the flag is 1 on the taken edge."**
+    That was this document's own reading while the function still differed, and it is wrong.
+    `-fno-tree-vrp` leaves the PHI argument at 1, and so do `-fno-ssa-phiopt`, `-fno-tree-forwprop`,
+    `-fno-tree-ccp` and `-fno-tree-sink`; the pass is `tree-ssa-dom.c`, through the boolean-range
+    special case in `record_edge_info` (§10). The correction is not pedantry, because it moves the
+    lever: VRP would have had to be attacked by changing the *value*, and DOM's special case is
+    keyed on the *type*, which is why a `_Bool` closes it and no `int` spelling does.
+12. **"Blocking the `auto_inc_dec` fusion is enough for `ez_strsep`."** Refuted with the pass's own
+    debug counter, which is what a `dbg_cnt` is for. There are exactly three folds in that
+    translation unit before the delimiter path, so `-fdbg-cnt=auto_inc_dec:2` blocks that one and
+    leaves the loop's shipped `ldrb r3, [r5], #1` alone. The result is
+    `mov r3, #0 ; add r4, r4, #1 ; strb r3, [r4, #-1] ; str r4, [r7]` — five instructions and four
+    bytes too long, because with the add still *after* the store `q` dies at the add, IRA gives the
+    add's result `q`'s own register, and post-reload rewrites the pair with a `-1` displacement.
+    The requirement is one pass earlier: the add has to be in front of the store, which is TER's
+    decision. Register allocation has no such counter — `grep dbg_cnt ira-*.c` is empty — so the
+    same measurement is not available for the other two functions.
+13. **The cross-jumped duplicate as an IRA reference device — sound, and inapplicable here.** Two
+    identical `if`-arms are counted by IRA and then merged away by `pass_jump2` after reload, so
+    they add references at zero cost in the output. It was the one construct `ez_new_sc_ioctl` had
+    not tried. It does not apply: the duplicated body has to end in a `GIMPLE_COND` or
+    `tree-ssa-tail-merge` removes it before RTL ever sees two copies, and every condition available
+    to write in this function is over `is_null` or `rq`, whose ranges VRP already knows. A repeated
+    `if (is_null) return -1;` after the guard is deleted outright; `return -is_null;` folds to
+    `-1`; a second null test is unified by FRE. **A device that needs a surviving conditional is
+    unusable in a function where every candidate conditional is provably redundant** — which is why
+    an empty `asm`, which is not a conditional at all, is what closed it.
 
 ---
 
@@ -592,9 +731,22 @@ are reproduced as a labelled comment block, which is the whole of their observab
 **The vendor's actual source text.** The reconstructed guard in `process_config_vars` is a
 value-preserving rewrite chosen because it is the only spelling found that reproduces both the
 single `orrs`/`beq` and `n`'s survival across the calls. The vendor's own spelling is not
-recoverable from the binary. This is the general case, not an exception: **the 43 byte-identical
-OEM functions compile to identical instructions without being the vendor's original text**, and
-nothing in a binary can distinguish two sources that compile the same.
+recoverable from the binary. This is the general case, not an exception: **all 46 OEM functions
+compile to identical instructions without being the vendor's original text**, and nothing in a
+binary can distinguish two sources that compile the same.
+
+**Six empty `asm` statements, a `_Bool` and a `goto`.** The constructs that closed the last three
+functions were chosen for the compiler, not for a reader, and each is commented as such at its
+site. Two `asm`s in `ez_new_sc_ioctl` and three in `process_config_vars` exist only to raise an RTL
+reference count, because IRA's colouring order at `-Os` *is* that count and no ordinary C reaches
+it; a fourth in `process_config_vars` keeps a basic block alive by using the value stored in it;
+`_Bool m` is not a plausible vendor choice for a value used as `m & 1`, but it is the only way
+found to keep the loop PHI out of `ssa_name_has_boolean_range`; and `goto zero_pos` is the one
+place where §7's rule is deliberately not applied, because that tail appears once with six
+predecessors rather than twice, which is what a label is for. None of these is forced by the
+binary — any source producing one `pos = 0` statement, or two more references to `is_null`, would
+do — and none is offered as the vendor's. **Byte-exactness means the object code is the vendor's.
+It does not mean the text is**, and these six `asm`s are where the distinction is most visible.
 
 ---
 
@@ -617,34 +769,53 @@ nothing in a binary can distinguish two sources that compile the same.
   to a single scalar — provided split immediates are recombined first.
 - A shared tail is evidence of duplicated source. A `goto` in a reconstruction is a hypothesis.
 - A per-function harness that compares symbolically cannot see a placement error. Check the linked
-  artefact positionally, bucketed by symbol, as a separate standing check.
+  artefact positionally, bucketed by symbol, as a separate standing check — and prove the check
+  fires by reverting a known fix, because a check never observed to fire is not yet a check.
+- When a compiler optimises for size, decisions that look like heuristics collapse into counts.
+  `REG_FREQ_FROM_BB` returns a constant under `optimize_function_for_size_p`, so `ALLOCNO_FREQ` is
+  exactly 1000 times the RTL reference count and IRA's colouring order is a sort on that number. An
+  allocation tie is then arithmetic, not taste — and, as a corollary worth as much as the rule,
+  block frequencies do not exist at all, so `unlikely()` cannot move such a tie by any amount.
+- **A decision keyed on a type cannot be reached by respelling a value.** DOM's boolean-range
+  special case is keyed on the PHI's type, and `uncprop` is bounded by `gimple_can_coalesce_p`,
+  which compares `TREE_TYPE` pointers. Both were swept against for thousands of value-preserving
+  spellings before the type was noticed. Ask what the pass tests before enumerating what to write.
+- A pass that carries a `dbg_cnt` can be interrogated one site at a time, which converts "which of
+  these two passes decides it" from an argument into a measurement (§11.12).
 
 **Does not generalise, or not yet.**
 - The `-Os` block-layout rule (§7) is a GCC 6 fact: `reorder_basic_blocks_simple` skipping its edge
   sort under `optimize_size`. Do not carry it to GCC 4.9/5.4 or to GCC 7+ without re-deriving it.
 - The `.text`-order rule is GCC-specific (reverse `ipa_reverse_postorder`) and interacts with
   `-ffunction-sections` and linker ordering; here neither was in play.
-- The three remaining residuals are register-allocation and statement-placement decisions made
-  after every source-level fact has been fixed. Nothing in §§2-8 reaches them, and the sweeps in
-  §11 are the evidence for that. Closing them will need either a construct that changes what IRA
-  and TER *see* (a live-range or reference-count change, not a rename) or an instrumented compiler
-  used as a diagnostic to bound the search before another spelling hunt.
+- The three that closed last were register-allocation and statement-placement decisions made after
+  every source-level fact had been fixed. Nothing in §§2-8 reaches them, and the sweeps in §11 are
+  the evidence for that. What did reach them was reading the deciding pass's own numbers —
+  `-fira-verbose=9`'s push order, `-fdump-rtl-expand-details`'s coalescing verdicts — and then
+  building a construct that changes what that pass *sees* rather than what the source says. **That
+  method generalises; the three constructs do not.** They are GCC 6.5.0 facts, two of them are not
+  C anyone should write, and on another compiler the first step would be to re-derive the rule and
+  the last would be to expect a different device.
 
 ---
 
 ## 14. Provenance
 
-Every number in this document comes from `README.md`, `PLAN.md` and the six `FINDINGS-*.md` files
-in the reconstruction tree, and from the 59-commit log, all read at the state of commit `5ad7b36`
-("Documentation: the structural count is 203, not 228"). No claim here was measured fresh for this
-document, and none should be quoted as if it were: where a figure matters, re-run
-`build/fulldiff.py` and `build/oem/run.sh --score` and cite those.
+Every number in this document comes from `README.md`, `PLAN.md` and the `FINDINGS-*.md` files in
+the reconstruction tree, and from the commit log, all read at the byte-exact state of `main`. No
+claim here was measured fresh for this document, and none should be quoted as if it were: where a
+figure matters, re-run `build/verify.sh`, which exports HEAD, builds it twice and asserts the
+SHA-256 — and `cmp`s the result as well if it is pointed at a copy of the shipped module.
 
-One correction to the brief that prompted this document is recorded inline in §4 (the
-literal-pool/split-immediate trap). One internal disagreement between the FINDINGS docs is recorded
-in `FINDINGS-oem-catalogue.md` §5 itself and is repeated here without adjudication: the
-`rtw_mlme_ext.c` `__LINE__` delta is 60 in the OEM catalogue and 61 in `FINDINGS-driver-config.md`,
-because `__LINE__` inside a multi-line `RTW_INFO` invocation evaluates one higher than the line its
-text starts on.
+Two corrections are recorded inline rather than silently applied. §4 corrects the brief that
+prompted this document, which described the offset-differential trap as literal-pool loads
+masquerading as struct offsets when it is split-immediate recombination. §11.11 corrects *this
+document's own* earlier reading of `process_config_vars`: the cmov pair is folded away by
+`tree-ssa-dom.c`, not by VRP, and the difference decided how the residual was finally attacked. One
+internal disagreement between the FINDINGS docs is recorded in `FINDINGS-oem-catalogue.md` §5
+itself and is repeated here without adjudication: the `rtw_mlme_ext.c` `__LINE__` delta is 60 in
+the OEM catalogue and 61 in `FINDINGS-driver-config.md`, because `__LINE__` inside a multi-line
+`RTW_INFO` invocation evaluates one higher than the line its text starts on.
 
-The reproduction is **not** byte-identical, and this document should not be cited as if it were.
+The reproduction is byte-identical. The reconstructed source is not the vendor's text, will not
+become so, and §12 is the honest statement of what separates the two.

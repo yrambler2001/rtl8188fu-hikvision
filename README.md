@@ -255,11 +255,11 @@ order of confidence:
      * IRA colours allocnos in `ALLOCNO_FREQ` order, and at `-Os` that is
        exactly 1000 x the number of times the pseudo appears in the RTL
        (§21). Three registers in the shipped code are decided by that count
-       and by nothing else, so three of the six asms exist only to raise a
-       count: `is_null` over `rq` in `ez_new_sc_ioctl`, `end` over `j` and the
-       guard temp over `buf` in `process_config_vars`.
+       and by nothing else, so five of the six asms exist only to raise it:
+       two for `is_null` over `rq` in `ez_new_sc_ioctl`, two for `end` over
+       `j` and one for the guard temp over `buf` in `process_config_vars`.
      * `process_config_vars`'s shared `pos = 0` has to be **one** statement in
-       a block that survives `cleanup_cfg`; the fourth asm makes the store a
+       a block that survives `cleanup_cfg`; the sixth asm makes the store a
        real use, which both keeps the block and stops cross-jumping merging
        the guard-true arm's own copy into it (§17).
    * `process_config_vars`'s `_Bool m` and its `(end == 0) & (m & 1)` skip

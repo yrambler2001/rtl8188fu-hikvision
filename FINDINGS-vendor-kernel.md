@@ -1,10 +1,14 @@
-# Barrier 3: building against the Fullhan vendor kernel
+# Barrier 2: building against the Fullhan vendor kernel
 
-Barrier 3 was "vendor kernel tree + `.config`". It is now closed far enough that it
-is no longer the bottleneck: **semantic identity went from 2197/3939 functions
-(55.8%) to 2570/3939 (65.2%)**, and every offset-correction family that could be
-blamed on kernel headers has disappeared from the histogram. What is left is one
-single driver-side struct discrepancy, described at the end.
+> **Status: closed**, and the module now reproduces byte for byte. This note is
+> the record of the work package that recovered the kernel; its numbers are that
+> pass's, not the current state. `README.md` §4 has the final accounting.
+
+Barrier 2 was "vendor kernel tree + `.config`". This pass closed it far enough
+that it was no longer the bottleneck: **semantic identity went from 2197/3939
+functions (55.8%) to 2570/3939 (65.2%)**, and every offset-correction family that
+could be blamed on kernel headers disappeared from the histogram. What that left
+was one single driver-side struct discrepancy, described at the end.
 
 ## The tree
 

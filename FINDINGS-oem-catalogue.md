@@ -5,19 +5,18 @@ This note is the catalogue WP-D was asked for: what the two missing translation
 units are, what is in them, how each fact was read out of the binary, and where
 the reconstruction stands.
 
-**Result so far:** the whole-file gap went **28,368 -> 1,421 bytes** of
-positional difference (1.479% -> **0.07%** of 1,918,056; 228 by the
-scoreboard's shift-tolerant structural count, which understates - see section
-10). **35 of the 41 sections are byte-identical** -
-`.rodata.str1.1`, `.rodata`, `.data`, `.bss`, `.comment`, `.modinfo`,
-`.ARM.exidx`, the ARM attributes, **`.strtab`** and eleven of the twelve
-relocation sections - every relocation in the module now matches - and
-`.symtab` has the right size, the right entry count, no missing or extra
-symbol and the right symbol *order*, uniquifiers included.
-**43 of the 46 OEM functions are byte-identical**, and so are all four public
-functions the OEM patch distorts, plus `rtw_efuse_analyze` (section 14).
-Sections 10 to 19 are the current state; sections 1 to 9 are the original WP-D
-catalogue.
+**Result: closed.**  The whole-file gap went **28,368 -> 0 bytes** of positional
+difference; `cmp` is silent, both files hash to
+`a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`, and **all
+41 sections are byte-identical** - `.text`, `.rodata`, `.rodata.str1.1`,
+`.data`, `.bss`, `.symtab`, **`.strtab`**, `.modinfo`, `.comment`, the ARM
+attributes, `.note.gnu.build-id`, all twelve relocation sections and all four
+exidx sections.  `.symtab` has the shipped size, entry count, order and every
+`st_value`, and all 879 `__func__.NNNN` uniquifiers match.  **All 46 OEM
+functions are byte-identical**, as are the four public functions the OEM patch
+distorts and `rtw_efuse_analyze` (section 14).  Section 10 is the ladder that
+got there and sections 10 to 22 the current state; sections 1 to 9 are the
+original WP-D catalogue.
 
 ---
 
@@ -433,7 +432,7 @@ python3 build/oem/oemdiff.py --shipped /path/8188fu.ko --catalogue
 ### The variant search
 
 Hand-guessing C shapes stops paying after a few dozen tries; the last four
-residuals took about 27,000 machine-generated ones.  A *spec* expresses one
+residuals took about 100,000 machine-generated ones.  A *spec* expresses one
 function as a template with orthogonal, semantically-neutral axes -
 declaration order, local types, explicit temporary versus recomputation,
 `if/else` versus early return, operand order in commutative expressions,
