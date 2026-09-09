@@ -108,20 +108,59 @@ const u8 invalid_efuse_data2[10] = {
  * enumerator, a typedef costs one, and nothing is emitted.  Delete one and
  * every `__func__.NNNN' after it in this file stops matching.
  * ------------------------------------------------------------------------ */
-/* before ez_set_country: 9 declarations */
+/* before ez_set_country: 9 declarations, one of which is process_config_vars's
+ * `zero_pos' label - see below - so this placeholder carries the other 8 */
 enum ez_wifi_uid_gap_1 {
 	EZ_WIFI_UID_GAP_1_0, EZ_WIFI_UID_GAP_1_1, EZ_WIFI_UID_GAP_1_2,
 	EZ_WIFI_UID_GAP_1_3, EZ_WIFI_UID_GAP_1_4, EZ_WIFI_UID_GAP_1_5,
 	EZ_WIFI_UID_GAP_1_6
 };
 
+/*
+ * process_config_vars() carries three reconstruction devices, all of them
+ * empty `asm's that emit no instructions.  They are not the vendor's text;
+ * they reproduce three GCC 6.5.0 decisions that no ordinary-C spelling was
+ * found to reach.  FINDINGS-oem-catalogue.md section 17 has the derivation
+ * and the passes involved; in short:
+ *
+ *   1. `asm("" : "+r"(pos))' after the shared `pos = 0'.  The tail has to be
+ *      one statement, not seven per-edge copies, or out-of-SSA's per-edge
+ *      coalesce costs put the guard temp in pos's partition and pos needs a
+ *      second register plus a latch copy.  Writing it once and reaching it by
+ *      `goto' is not enough: the block would be an empty forwarder and
+ *      cleanup_cfg would delete it, redistributing the argument.  Making the
+ *      store a real *use* keeps the block, and putting the asm last also stops
+ *      cross-jumping merging the guard-true arm's own `pos = n' into it
+ *      (can_replace_by() in cfgcleanup.c matches a constant against a register
+ *      with an equal REG_EQUAL note; it does not match an asm).
+ *
+ *   2. two `asm("" :: "r"(end))' in the same block.  IRA colours in
+ *      ALLOCNO_FREQ order, which at -Os is exactly 1000 x the number of RTL
+ *      references, and `end' has to out-count `j' to be given r4 first.
+ *
+ *   3. `asm("" :: "r"((pos | n) | (pos & n)))' in the default arm.  Same
+ *      mechanism, for the guard temp against `buf': the temp's thread carries
+ *      no argument-register copy, so without one more reference `buf' sorts
+ *      first and the two swap r9 and sl.
+ *
+ * `m' is `_Bool' for a different reason: tree-ssa-dom.c's record_edge_info()
+ * has a special case for a branch on a name with a boolean range, and
+ * cprop_into_successor_phis() applies it to PHIs in non-dominated blocks, so
+ * with any `int' spelling the loop PHI's argument becomes the constant 1 and
+ * the shipped cstore (`moveq r7,#1 / movne r7,#0') dies.  Writing the guard as
+ * `(end == 0) & (m & 1)' then keeps the `andeq r3,r7,#1' that a `_Bool' would
+ * otherwise lose, because `m & 1' gimplifies to `(_Bool) m'.
+ *
+ * The `zero_pos' label costs one DECL_UID; the placeholder above is one
+ * enumerator shorter to pay for it.
+ */
 int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 {
-	u32 i;
 	unsigned int pos = 0;
 	u32 n = 0;
 	_Bool m = 0;
 	int end = 0;
+	u32 i;
 	int j = 0;
 
 	for (i = 0; i < len; i++) {
@@ -156,6 +195,7 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 			goto zero_pos;
 		}
 		else {
+			__asm__ __volatile__("" :: "r"((pos | n) | (pos & n)));
 			size_t vlen = strlen(var);
 			int cmp = memcmp(&buf[i], var, vlen);
 
@@ -190,6 +230,8 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 zero_pos:
 		pos = 0;
 		__asm__ __volatile__("" : "+r"(pos));
+		__asm__ __volatile__("" :: "r"(end));
+		__asm__ __volatile__("" :: "r"(end));
 	}
 
 	return j;
