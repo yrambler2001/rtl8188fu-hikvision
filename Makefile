@@ -1,5 +1,8 @@
 EXTRA_CFLAGS += $(USER_EXTRA_CFLAGS)
-EXTRA_CFLAGS += -O1
+# Realtek ships -O1 here. The shipped binary's ARM attributes say
+#   Tag_ABI_optimization_goals: Aggressive Size
+# which is -Os, so the vendor build used -Os. Match it.
+EXTRA_CFLAGS += -Os
 #EXTRA_CFLAGS += -O3
 #EXTRA_CFLAGS += -Wall
 #EXTRA_CFLAGS += -Wextra
@@ -55,7 +58,7 @@ CONFIG_GSPI_HCI = n
 ########################## Features ###########################
 CONFIG_AP_MODE = y
 CONFIG_P2P = y
-CONFIG_MP_INCLUDED = y
+CONFIG_MP_INCLUDED = n
 CONFIG_POWER_SAVING = y
 CONFIG_IPS_MODE = default
 CONFIG_LPS_MODE = default
@@ -101,7 +104,7 @@ CONFIG_APPEND_VENDOR_IE_ENABLE = n
 CONFIG_RTW_NAPI = y
 CONFIG_RTW_GRO = y
 CONFIG_RTW_NETIF_SG = y
-CONFIG_RTW_IPCAM_APPLICATION = n
+CONFIG_RTW_IPCAM_APPLICATION = y
 CONFIG_RTW_REPEATER_SON = n
 CONFIG_ICMP_VOQ = n
 CONFIG_IP_R_MONITOR = n #arp VOQ and high rate
@@ -164,7 +167,8 @@ CONFIG_SECURE_DMA = n
 CONFIG_SECURE_DMA_MEM_ADDR = 0
 CONFIG_SECURE_DMA_MEM_SIZE = 3686400
 ###################### Platform Related #######################
-CONFIG_PLATFORM_I386_PC = y
+CONFIG_PLATFORM_I386_PC = n
+CONFIG_PLATFORM_GENERIC_ARM = y
 CONFIG_PLATFORM_ANDROID_X86 = n
 CONFIG_PLATFORM_ANDROID_INTEL_X86 = n
 CONFIG_PLATFORM_JB_X86 = n
@@ -1373,8 +1377,10 @@ ifeq ($(CONFIG_PLATFORM_I386_PC), y)
 ## For I386 X86 ToolChain use Hardware FLOATING
 EXTRA_CFLAGS += -mhard-float
 else
+ifneq ($(CONFIG_PLATFORM_GENERIC_ARM), y)
 ## For ARM ToolChain use Hardware FLOATING
 EXTRA_CFLAGS += -mfloat-abi=hard
+endif
 endif
 endif
 
@@ -1435,6 +1441,18 @@ KSRC := /lib/modules/$(KVER)/build
 MODDESTDIR := /lib/modules/$(KVER)/kernel/drivers/net/wireless/
 INSTALL_PREFIX :=
 STAGINGMODDIR := /lib/modules/$(KVER)/kernel/drivers/staging
+endif
+
+ifeq ($(CONFIG_PLATFORM_GENERIC_ARM), y)
+# Generic ARMv7 Linux target, added for the reproduction build.
+# Mirrors the shipped module: platform/platform_ops.o only, cfg80211, little endian.
+EXTRA_CFLAGS += -DCONFIG_LITTLE_ENDIAN
+EXTRA_CFLAGS += -DCONFIG_IOCTL_CFG80211 -DRTW_USE_CFG80211_STA_EVENT
+EXTRA_CFLAGS += -DCONFIG_PLATFORM_OPS
+ARCH ?= arm
+CROSS_COMPILE ?= arm-linux-gnueabi-
+KSRC ?= /build/linux
+MODDESTDIR := /lib/modules/$(KVER)/kernel/drivers/net/wireless/
 endif
 
 ifeq ($(CONFIG_PLATFORM_NV_TK1), y)
