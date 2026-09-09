@@ -9,3 +9,4 @@ modules.order
 *.markers
 *.symvers
 *.d
+__pycache__/

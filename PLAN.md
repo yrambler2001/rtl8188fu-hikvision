@@ -3,8 +3,13 @@
 Reference: `/path/to/8188fu.ko`, 1,918,056 bytes,
 3939 functions / 975,404 bytes of `.text`.
 
-Measurement: `build/offsetdiff.py <shipped> <rebuilt>`.
-Current: **3882 / 3939 functions (98.6%) semantically identical**, 97.3% of `.text`.
+Measurement:
+
+* `build/offsetdiff.py <shipped> <rebuilt>` - per-instruction operand diff of `.text`.
+  Current: **3882 / 3939 functions (98.6%) semantically identical**, 97.3% of `.text`.
+* `build/fulldiff.py <shipped> <rebuilt>` - whole-file scoreboard, every section, the
+  symbol table, the relocations and the string tables. Current: **37,630 bytes still
+  differ (1.96% of the file)**; see `FINDINGS-byte-gap.md`.
 
 ## Barriers
 
@@ -13,8 +18,9 @@ Current: **3882 / 3939 functions (98.6%) semantically identical**, 97.3% of `.te
 | 1 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) are not in the Realtek tarball | open - reconstruct from Hex-Rays |
 | 2 | vendor compiler | **solved** - stock GCC 6.5.0 (kernel.org crosstool) matches |
 | 3 | vendor kernel tree + `.config` (Fullhan FH865X, Linux 4.9.129) | **solved** - see `FINDINGS-vendor-kernel.md` |
-| 4 | build path `/data1/jiangqifeng6/...` baked into `.rodata` by `__FILE__` | open - trivial once someone builds under that path |
+| 4 | build path `/data1/jiangqifeng6/...` baked into `.rodata` by `__FILE__` | **solved** - see `FINDINGS-byte-gap.md` |
 | 5 | driver `#ifdef` configuration | **solved** - see `FINDINGS-driver-config.md` |
+| 6 | GCC's `--with-pkgversion` string, 159 copies in `.comment` | open - needs a rebuilt GCC 6.5.0 |
 
 ## Work packages
 
@@ -27,18 +33,35 @@ Current: **3882 / 3939 functions (98.6%) semantically identical**, 97.3% of `.te
   out of the symbol-set diff: `CONFIG_POWER_SAVING = n`, `CONFIG_TXPWR_LIMIT_EN = y`,
   `CONFIG_AUTO_NOTCH_FILTER = y`, and `CONFIG_PLATFORM_OPS` must *not* be defined; plus
   `REALTEK_CONFIG_PATH = "/dav/"`. 65.2% -> 98.6%, and the offset histogram is now empty.
-- **WP-D** *(now the whole remaining problem)* reconstruct `ez_sc.c` / `ez_wifi_config.c`
-  from `8188fu.ko.c` (Hex-Rays). 46 functions, ~9.6 KB of `.text`. Four functions in public
-  files carry exact line-count constraints on the patch (`collect_bss_info` +61 lines in
-  `rtw_mlme_ext.c`, `rtw_wx_set_priv` +2 in `ioctl_linux.c`, both efuse map writers +1 in
-  `rtw_efuse.c`), and four more show where the OEM hooks were spliced in (`OnProbeReq`,
-  `OnProbeRsp`, `rtw_ioctl`, `rtw_usb_primary_adapter_init`).
-- **WP-E** build under the original path so `.rodata` `__FILE__` strings match.
+- **WP-E** build under the original path *(done - `FINDINGS-byte-gap.md` section 3)*.
+  `build/build-vendorpath.sh` builds from
+  `/data1/jiangqifeng6/work/tongyibianyi/develop_branch/wifi/rtl8188FU_linux_v5.15.3-6-g1a2e952f9.20230217`
+  and pins `__DATE__`/`__TIME__` to `Dec 25 2023` / `20:43:27`. Every string our build
+  emits is now present in the shipped module; zero path-like differences remain.
+- **WP-D** *(now 75% of the remaining problem)* reconstruct `ez_sc.c` / `ez_wifi_config.c`
+  from `8188fu.ko.c` (Hex-Rays). 46 functions, ~9.6 KB of `.text`, ~28 KB of the 37.6 KB
+  whole-file gap. Constraints the binary already pins down:
+  * four exact line counts on the patch (`collect_bss_info` +61 lines in `rtw_mlme_ext.c`,
+    `rtw_wx_set_priv` +2 in `ioctl_linux.c`, both efuse map writers +1 in `rtw_efuse.c`);
+  * four public functions carrying OEM call sites (`OnProbeReq` -176, `rtw_ioctl` -332,
+    `OnProbeRsp` -12, `rtw_usb_primary_adapter_init` -8);
+  * 115 OEM strings, byte for byte, from `fulldiff.py --strings`;
+  * eight strings the OEM files duplicate from public files (`CN`, the vendor-IE messages);
+  * one OEM file prints `__DATE__`/`__TIME__`, compiled at `20:43:30`;
+  * the OEM code calls `kernel_read`, `kmem_cache_alloc`/`kmalloc_caches` and
+    `copy_to_user` (two extra out-of-line copies), none of which the public code reaches;
+  * 8 `.data` objects, 9 `.bss` objects and 19 `__func__` constants, with exact sizes.
+- **WP-F** *(new, 25% of the gap)* build GCC 6.5.0 with
+  `--with-pkgversion='arm_multilib_uclibc_20200924'`. That string is the only thing
+  separating our `.comment` from the shipped one and it reaches nothing else.
 
-Two single-function residues are recorded but unexplained: `_rtw_skb_alloc` (92 bytes; the
-shipped module inlines an `__alloc_skb` fast path that no tarball `#ifdef` produces) and
-`rtw_efuse_analyze` (4 bytes of register allocation). Both are detailed at the end of
-`FINDINGS-driver-config.md`.
+## Residuals
+
+`_rtw_skb_alloc` (92 bytes) and `rtw_efuse_analyze` (4 bytes) are still unexplained, and
+`rtw_sptime_get` is confirmed to be identical code with one extra alignment `nop`. All
+three are analysed in `FINDINGS-byte-gap.md` section 4 - including a disproof of the
+previous `-fmerge-constants` explanation for `rtw_efuse_analyze`, and the exact C
+reconstruction of the shipped `_rtw_skb_alloc`.
 
 Each work package is done by one agent, which writes a markdown report into the repo
 and commits it, so this file plus those reports are the full record.
