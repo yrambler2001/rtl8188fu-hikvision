@@ -84,17 +84,17 @@ const u8 invalid_efuse_data2[10] = {
 int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 {
 	u32 i;
-	int j = 0;
-	int m = 0;
-	int n = 0;
-	int end = 0;
 	int pos = 0;
+	int n = 0;
+	int m = 0;
+	int j = 0;
+	int end = 0;
 
 	for (i = 0; i < len; i++) {
 		if (buf[i] == '\r')
 			continue;
 
-		if (pos || n) {
+		if (n || pos) {
 			if (buf[i] == '\n') {
 				if (n) {
 					n = 0;
@@ -121,8 +121,13 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 			break;
 		default: {
 			size_t vlen = strlen(var);
+			int cmp = memcmp(&buf[i], var, vlen);
 
-			if (end || memcmp(&buf[i], var, vlen)) {
+			if (!end && !cmp) {
+				end = vlen;
+				j = 0;
+				i += end;
+			} else {
 				int skip;
 
 				if (end)
@@ -137,10 +142,6 @@ int process_config_vars(char *buf, u32 len, char *pick, const char *var)
 				end++;
 				if (!m)
 					break;
-			} else {
-				end = vlen;
-				j = 0;
-				i += vlen;
 			}
 			if (buf[i] != '\t') {
 				if (j) {
