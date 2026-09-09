@@ -68,7 +68,7 @@ int ez_set_new_sc(struct net_device *dev, int cmd, struct iw_point *iwp)
 {
 	int ret = 0;
 	u32 addr = 0;
-	u32 sc_cmd[2];
+	int sc_cmd[2];
 	u8 buf[514];
 
 	memset(buf, 0, 514);
@@ -93,10 +93,10 @@ int ez_set_new_sc(struct net_device *dev, int cmd, struct iw_point *iwp)
 		break;
 	case NEW_SC_POLL_RESULT:
 		printk("cmd NEW_SC_POLL_RESULT\n");
-		if (ez_new_sc.done)
-			ret = 308;
-		else
+		if (!ez_new_sc.done)
 			ret = 0;
+		else
+			ret = 308;
 		ez_new_sc.done = 0;
 		break;
 	case NEW_SC_GET_RESULTS:
