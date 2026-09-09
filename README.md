@@ -4,23 +4,22 @@ A byte-level reproduction of the `8188fu.ko` shipped in a Hikvision/EZVIZ IP
 camera firmware (`root_b240427`), together with the reconstructed source of the
 two OEM translation units that are in no public Realtek release.
 
-**Current state: 116 of 1,918,056 bytes differ — 0.0060% of the file**
-(a plain positional `cmp`; the shift-tolerant "structural" count in
-`fulldiff.py` says 192, and §6 explains why the two disagree).
+**Current state: byte-exact. All 1,918,056 bytes match.**
 
-**39 of the 41 sections are byte-identical**, including `.rodata`,
-`.rodata.str1.1`, `.data`, `.bss`, `.symtab`, `.strtab`, `.modinfo`,
-`.comment`, all twelve relocation sections and all four exidx sections. Every
-one of the 3,909 function symbols is at the shipped **address** with the
-shipped **size**, all 879 `__func__.NNNN` uniquifiers match, and all 38,970
-relocations match. `.text` is exactly 975,780 bytes.
+```
+a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  8188fu.ko  (shipped)
+a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  8188fu.ko  (rebuilt)
+```
 
-Only two sections still differ:
+`cmp` is silent. **All 41 sections are byte-identical**, including `.text`,
+`.rodata`, `.rodata.str1.1`, `.data`, `.bss`, `.symtab`, `.strtab`,
+`.modinfo`, `.comment`, `.note.gnu.build-id`, all twelve relocation sections
+and all four exidx sections. All 3,909 function symbols are at the shipped
+address with the shipped size, all 879 `__func__.NNNN` uniquifiers match, and
+all 38,970 relocations match.
 
-| section | bytes | what |
-|---|---:|---|
-| `.text` | 96 | two functions out of 3,909, both the right size, both differing only in which register the allocator picked |
-| `.note.gnu.build-id` | 20 | an SHA-1 over the linked output; converges last, by construction |
+`build/verify.sh` reproduces that from a clean `git archive` of HEAD, and two
+consecutive builds of that checkout are byte-identical to each other (§6).
 
 ---
 
@@ -73,7 +72,7 @@ configuration, and the small number of vendor edits to Realtek's own files.
 | 2 | vendor kernel tree + `.config` (Fullhan FH865X, Linux 4.9.129) | **closed** — `FINDINGS-vendor-kernel.md` |
 | 3 | driver `#ifdef` configuration | **closed** — `FINDINGS-driver-config.md` |
 | 4 | build path baked into `.rodata` by `__FILE__`, and `__DATE__`/`__TIME__` | **closed** — `FINDINGS-byte-gap.md` §3 |
-| 5 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) not in any release | **reconstructed** — 44/46 byte-identical, `FINDINGS-oem-catalogue.md` |
+| 5 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) not in any release | **reconstructed** — 46/46 byte-identical, `FINDINGS-oem-catalogue.md` |
 | 6 | `DECL_UID` uniquifiers (`__func__.NNNN`) in `.symtab`/`.strtab` | **closed** — 879/879, `.strtab` byte-identical, `FINDINGS-oem-catalogue.md` §11 |
 
 ### 3.1 The compiler
@@ -219,17 +218,19 @@ order of confidence:
    sizes and addresses; the data objects and their sizes; all 115 strings; the
    call graph (from the `BL` targets); the source order (from the `DECL_UID`
    uniquifiers, §3.6); the block layout inside each function (which at `-Os` is
-   source order, `FINDINGS-oem-catalogue.md` §12); and, for 44 of the 46
-   functions, an instruction sequence that matches word for word.
+   source order, `FINDINGS-oem-catalogue.md` §12); and, for all 46 functions,
+   an instruction sequence that matches word for word.
 2. **Constrained but not determined.** Identifier names of locals, parameters
    and non-exported functions (the shipped module is unstripped, so *global*
    names are recovered; locals are not), comments, whitespace, and any spelling
    choice the compiler normalises away. Where two spellings compile identically
    the reconstruction picks the one that reads most like the surrounding
    Realtek code.
-3. **Deliberate devices.** Three places carry a construct chosen because it
-   reproduces a compiler decision, and each is commented in the source and
-   written up in the catalogue:
+3. **Deliberate devices.** A handful of places carry a construct chosen because
+   it reproduces a compiler decision rather than because the vendor is likely
+   to have written it. Each is commented in the source and written up in the
+   catalogue. Byte-exactness means the *object code* is the vendor's; it does
+   not mean the text is.
    * the 65 `*_uid_gap_*` enum and typedef placeholders that stand in for
      declarations which emit no code (§3.6);
    * `ez_scan_device_ioctl_handle`'s duplicated tail and `ez_strsep`'s
@@ -240,6 +241,30 @@ order of confidence:
      (§18). The qualifier does not survive to the output; a `goto` to a
      mid-loop label reproduces the same bytes, so the binary does not choose
      between them.
+   * **six empty `asm` statements** - two in `ez_new_sc_ioctl` and four in
+     `process_config_vars`. They emit no instructions; what they do is add RTL
+     *references*, or keep a basic block from being deleted. Both are things
+     GCC decides on, and neither is expressible in ordinary C:
+     * IRA colours allocnos in `ALLOCNO_FREQ` order, and at `-Os` that is
+       exactly 1000 x the number of times the pseudo appears in the RTL
+       (§21). Three registers in the shipped code are decided by that count
+       and by nothing else, so three of the six asms exist only to raise a
+       count: `is_null` over `rq` in `ez_new_sc_ioctl`, `end` over `j` and the
+       guard temp over `buf` in `process_config_vars`.
+     * `process_config_vars`'s shared `pos = 0` has to be **one** statement in
+       a block that survives `cleanup_cfg`; the fourth asm makes the store a
+       real use, which both keeps the block and stops cross-jumping merging
+       the guard-true arm's own copy into it (§17).
+   * `process_config_vars`'s `_Bool m` and its `(end == 0) & (m & 1)` skip
+     guard. `_Bool` is not a plausible vendor choice for a value used as
+     `m & 1`, but the shipped cstore only survives when the PHI carrying it is
+     boolean-typed - `tree-ssa-dom.c` folds it to the constant 1 otherwise
+     (§17) - and the explicit `& 1` is then what keeps the `andeq r3,r7,#1`.
+   * `process_config_vars`'s `goto zero_pos`. §19's rule ("a shared tail is
+     duplicated source, not a `goto`") is about a tail that appears *twice* in
+     the output; this one appears once, with six predecessors, which is what a
+     label is for. It is still a choice the binary does not force: any source
+     that produces one `pos = 0` statement would do.
 
 ## 4. Result
 
@@ -254,33 +279,33 @@ order of confidence:
 | `.strtab` | **byte-identical** (124,098 bytes) |
 | `.symtab` | **byte-identical** (172,496 bytes): uniquifiers, order, `st_size` **and `st_value`** |
 | relocation sections | **all 12 byte-identical** (38,970 relocations) |
-| `.text` | **exactly 975,780 bytes**, every symbol at the right address and the right size |
+| `.text` | **byte-identical** (975,780 bytes) |
+| `.note.gnu.build-id` | **byte-identical** (an SHA-1 over the linked output) |
 | compiled source files | **159 / 159** |
 | function symbols | **3,909 / 3,909**, none missing, none extra |
-| byte-identical functions in `.text` | **3,907 / 3,909** |
+| byte-identical functions in `.text` | **3,909 / 3,909** |
+| OEM functions | **46 / 46** |
 | local symbol uniquifiers | **879 / 879** |
-| byte-identical sections | **39 / 41** |
-| **whole file** | **116 of 1,918,056 bytes differ (0.0060%)** |
+| byte-identical sections | **41 / 41** |
+| **whole file** | **0 of 1,918,056 bytes differ** |
 
-### What still differs
+### The last four residuals, and what closed each
 
-| function | bytes | words | edit distance | cause |
-|---|---:|---:|---:|---|
-| `process_config_vars` | 79 | 44 of 86 | 5 | Two named GCC decisions. `uncprop` rewrites all seven main-path `pos = 0` PHI arguments into the guard temp, and out-of-SSA's coalesce costs accumulate *per edge*, so seven beats pos's own two: the `orr` writes pos's register and pos needs a second one plus a latch copy. And the shipped build materialises `m` with a dead `moveq #1` / `movne #0` pair where ours branches straight to the shared `m = 1`, because VRP proves the flag is 1 on the taken edge. `FINDINGS-oem-catalogue.md` §17 |
-| `ez_new_sc_ioctl` | 17 | 5 of 14 | 2 | One IRA decision, read out of `-fira-verbose=9` and then out of `ira-color.c`: the colouring order is `bucket_allocno_compare_func`'s, whose first key is `ALLOCNO_FREQ` — and at `-Os` that is exactly 1000 × the number of RTL references. `rq` has three references and `is_null` two, so `rq` is coloured first and takes r2 on a weight-125 preference. Give `is_null` two more references and the order flips and the function is byte-identical; no ordinary-C spelling that adds them has been found. §21 |
+Every one was a named GCC 6.5.0 decision, read out of the compiler's own
+source and confirmed in its dumps rather than inferred, and searched
+mechanically — about 100,000 semantically-neutral spellings through
+`build/oem/gen.py` and `build/oem/lab.py`.
 
-Plus 20 bytes of `.note.gnu.build-id`, which is an SHA-1 of the two.
+| function | mechanism | what closed it |
+|---|---|---|
+| `ez_strsep` | `tree-ssa-ter.c` sank `q + 1` past the NUL store and `auto-inc-dec.c` folded the pair into a post-increment, so the two `*stringp` stores stopped being the same instruction and cross-jumping could not merge them | a TER-opaque store (§18) |
+| `ez_new_sc_ioctl` | IRA colours in `ALLOCNO_FREQ` order, which at `-Os` is exactly 1000 × the number of RTL references; `rq` had three and `is_null` two, so `rq` was coloured first and took r2 on a weight-125 shuffle preference | two empty `asm`s, i.e. two more references to `is_null` (§21) |
+| `process_config_vars`, the `m` cstore | `tree-ssa-dom.c`'s `record_edge_info` records `x == 1` on the true edge of `if (x != 0)` when `x` has a boolean range, and `cprop_into_successor_phis` applies that to PHIs in non-dominated blocks, so the loop PHI's argument folds to 1 and the cstore dies | `_Bool m`, plus `(end == 0) & (m & 1)` to keep the `andeq` (§17) |
+| `process_config_vars`, `pos` and the loop tail | with seven per-edge `pos = 0` copies, out-of-SSA's per-edge coalesce costs put the guard temp in pos's partition (`pos_5 & _32 : Success`, `pos_5 & pos_6 : Fail due to conflict` in the expand dump), and `reorder_basic_blocks_simple` — which does not sort at `-Os` — then gave the loop tail to the wrong predecessor | one shared `pos = 0` in a block kept alive by an `asm` that *uses* the stored value (§17) |
 
-`ez_strsep` closed during this pass: `tree-ssa-ter.c` was sinking `q + 1` past
-the NUL store, `auto-inc-dec.c` was then folding the pair into a
-post-increment, and the two `*stringp` stores stopped being the same
-instruction so cross-jumping could not merge them. §18.
-
-All three were searched mechanically, not guessed at: about 90,000
-semantically-neutral spellings through `build/oem/gen.py` and
-`build/oem/lab.py`, and the passes that decide each of them were read out of
-GCC 6.5.0's own source and confirmed in its dumps rather than inferred. §10 and
-§17–21 say what was swept and what was ruled out.
+Two register assignments inside `process_config_vars` were decided by the same
+reference-count rule as `ez_new_sc_ioctl` and needed the same device: `end`
+over `j`, and the guard temp over `buf`.
 
 ## 5. Reproducing it
 
@@ -379,6 +404,16 @@ which registers IRA picked scores nearly every word different, so `n` is
 almost useless as a gradient. Results are cached by source hash;
 `build/oem/lab/` is scratch and untracked.
 
+**When `s` reaches 0 and `n` does not**, the instruction sequence is already
+the vendor's and only the register assignment is left — and at `-Os` that is
+decided entirely by the RTL reference count, so switch tools: read the
+`Pushing`/`Popping` order out of `-fira-verbose=9` and the coalescing verdicts
+(`pos_5 & _32 : Success`) out of `-fdump-rtl-expand-details`. Both print the
+decision instead of leaving it to be inferred, and both were what closed the
+last function. `d` must stay `+0` throughout: every OEM symbol is pinned at
+the shipped address, so a variant that is structurally closer but one
+instruction longer is strictly worse.
+
 `build/oem/oemdiff.py` compares an object file to the *linked* module, which
 cannot be done positionally: bytes under a relocation are masked and compared
 symbolically (target symbol, addend, and for `.rodata.str1.1` the actual
@@ -401,7 +436,7 @@ that is what hid barrier 6 (§3.6).
 
 ## 6. Verification
 
-`build/verify.sh` exports HEAD with `git archive`, builds it twice in the
+`build/verify.sh` exports HEAD with `git archive`, builds it **twice** in the
 container, and scores the result:
 
 ```
@@ -411,29 +446,31 @@ $ sh build/verify.sh /path/to/8188fu.ko
 == determinism: rebuilding
    build is deterministic
 == scoreboard
-   .text                                  172  89.6%          96  content 172, (+24 branch displacements)
-   .note.gnu.build-id                      20  10.4%          20  content 20
+== RANKED: where the remaining bytes are  (structural, shift-tolerant)
+   section                         structural  share         raw  breakdown
 
 == SUMMARY
-   STRUCTURAL  192 bytes differ (0.010% of the shipped 1,918,056)
-   RAW         116 bytes differ positionally (0.01%)
-   link layout inside otherwise-matching symbols: 0 bytes of relocation addends, 24 bytes of B/BL displacements
-   byte-identical sections: 39/41
+   STRUCTURAL  0 bytes differ (0.000% of the shipped 1,918,056)
+   RAW         0 bytes differ positionally (0.00%)
+   link layout inside otherwise-matching symbols: 0 bytes of relocation addends, 0 bytes of B/BL displacements
+   byte-identical sections: 41/41
 == hashes
-a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  8188fu.ko  (shipped)
-b2e014d2554540023997ed39ff32371cc30925d9081528ad6ef04d4dbf2b9809  8188fu.ko  (ours)
+a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  /path/to/8188fu.ko
+a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13  cleanchk/8188fu.ko
 == cmp
-... differ: char 69, line 1
+   IDENTICAL
 ```
 
-`cmp` is **not** clean, and the numbers above are the honest statement of how
-far this got.  Two consecutive builds of the same clean checkout are
-byte-identical to each other, and the clean checkout is byte-identical to the
-working tree's build, so nothing the build needs is untracked and nothing in it
-is non-deterministic.  The first differing byte is at offset 68, inside the
-`.note.gnu.build-id` SHA-1 — a hash of the two functions in §4, which cannot
-match until they do.  Everything before it, including `e_shoff` and the whole
-section header table, is right.
+So: a clean `git archive` of HEAD reproduces the shipped module bit for bit;
+two consecutive builds of that checkout are byte-identical to each other, so
+nothing in the build is non-deterministic; and nothing the build needs is
+untracked.
+
+That is the whole verification, and it is the only one that matters now — a
+plain `cmp` of two 1,918,056-byte files cannot be fooled by a masking rule.
+The rest of this section is about the *scoreboards*, which were what the work
+was steered by while the file still differed, and which are all fallible in
+ways worth recording.
 
 **Every masking rule in the harness is enumerated in
 `FINDINGS-oem-catalogue.md` §22**, together with the check that covers it, and
@@ -454,8 +491,12 @@ linked module, which cannot be done positionally, so it masks every relocated
 word and every `B`/`BL` displacement and compares those symbolically. A
 function it calls byte-identical can therefore still differ in the linked
 output — and four of them did, because they were in the wrong *place*. See
-`FINDINGS-oem-catalogue.md` §20. Always check the linked module positionally
-as well, bucketed by symbol.
+`FINDINGS-oem-catalogue.md` §20. It bit once more at the very end: the
+per-function harness reported 46/46 while the linked module still differed,
+because the harness compiles with its own flags into `/tmp` and the module is
+built from a copy of the tree at the vendor's absolute path. Always check the
+linked module positionally as well, bucketed by symbol — and, now that it is
+possible, with `cmp`.
 
 ## 7. Repository layout
 

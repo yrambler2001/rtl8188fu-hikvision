@@ -8,11 +8,11 @@ SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
 
 * `build/fulldiff.py <shipped> <rebuilt> [--brief]` — whole-file scoreboard:
   every section, the symbol table, the relocations and the string tables.
-  Current: **116 bytes still differ positionally (0.0060% of the file)**, 192
-  by the shift-tolerant "structural" count; 39 of the 41 sections are
-  byte-identical.  *Compare attempts by the raw number:* the structural count
-  charges a function whose size is wrong only its size delta and never looks
-  inside it, so it can rate a worse state better.
+  Current: **0 bytes differ**; 41 of the 41 sections are byte-identical and
+  `cmp` is silent.  *While anything still differs, compare attempts by the raw
+  number:* the structural count charges a function whose size is wrong only
+  its size delta and never looks inside it, so it can rate a worse state
+  better.
   *Caveat:* it strips GCC's `.NNNN` uniquifiers before comparing `.strtab`, so
   a `.strtab` scored 0 is not necessarily byte-identical. Use
   `build/oem/uidgap.py` for that - it prints the DECL_UID oracle per interval.
@@ -49,7 +49,7 @@ SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
 | 2 | vendor kernel tree + `.config` (Fullhan FH865X, Linux 4.9.129) | **solved** — `FINDINGS-vendor-kernel.md` |
 | 3 | driver `#ifdef` configuration | **solved** — `FINDINGS-driver-config.md` |
 | 4 | build path in `.rodata` via `__FILE__`, and `__DATE__`/`__TIME__` | **solved** — `FINDINGS-byte-gap.md` §3 |
-| 5 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) | **reconstructed** — 44/46 byte-identical, all 46 at the shipped address and size; `FINDINGS-oem-catalogue.md` |
+| 5 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) | **reconstructed** — 46/46 byte-identical; `FINDINGS-oem-catalogue.md` |
 | 6 | `DECL_UID` uniquifiers in `.symtab`/`.strtab` | **solved** — 879/879, `.strtab` byte-identical; `FINDINGS-oem-catalogue.md` §11 |
 
 ## Work packages
@@ -59,8 +59,8 @@ SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
   `fh8856v200_defconfig`, retargeted `CPU_V6` → `CPU_V7`
 - **WP-C** driver `#ifdef` configuration *(done — `FINDINGS-driver-config.md`)*
 - **WP-D** reconstruct `ez_sc.c` / `ez_wifi_config.c` *(done —
-  `FINDINGS-oem-catalogue.md`)*: 28,368 → 116 bytes, 44/46 functions
-  byte-identical, all 46 at the shipped address and size
+  `FINDINGS-oem-catalogue.md`)*: 28,368 → 0 bytes, 46/46 functions
+  byte-identical
 - **WP-E** build under the original path *(done — `FINDINGS-byte-gap.md` §3)*
 - **WP-F** GCC 6.5.0 with `--with-pkgversion='arm_multilib_uclibc_20200924'`
   *(done — `FINDINGS-toolchain.md`)*: `.comment` 9,347 → 0 bytes, and all 158
@@ -80,23 +80,24 @@ SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
 
 ## Residuals
 
-**116 bytes**, in two functions and the build-id that hashes them. Both are
-the *right size* and at the *right address*; each is one named GCC decision
-(`FINDINGS-oem-catalogue.md` §17, §21):
+**None.**  `cmp` is silent, both files hash to
+`a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`, and all 41
+sections are byte-identical.  `build/verify.sh` reproduces that from a clean
+`git archive` of HEAD and confirms two consecutive builds agree.
 
-| | bytes | words | edit distance | cause |
-|---|---:|---:|---:|---|
-| `process_config_vars` | 79 | 44 of 86 | 5 | `uncprop` rewrites all seven main-path `pos = 0` PHI arguments into the guard temp and out-of-SSA's coalesce costs accumulate per edge, so the temp is coalesced into pos's partition and pos needs a second register plus a latch copy; and the shipped build materialises `m` with a dead cmov pair where VRP lets ours branch straight to the shared `m = 1`. Giving the guard a type `gimple_can_coalesce_p` refuses fixes the first exactly — the whole register cascade then matches — but moves the loop tail, because the seven edge copies become blocks that cross-jumping merges with the guard-true arm's own |
-| `ez_new_sc_ioctl` | 17 | 5 of 14 | 2 | an IRA colouring-order decision: `bucket_allocno_compare_func`'s first key is `ALLOCNO_FREQ`, which at `-Os` is 1000 × the number of RTL references. `rq` has three, `is_null` two, so `rq` is coloured first and takes r2 on its weight-125 shuffle preference. Two more references on `is_null` reverse it and the function is byte-identical |
-| `.note.gnu.build-id` | 20 | | | an SHA-1 over the linked output |
+The last four, and what closed each (`FINDINGS-oem-catalogue.md` §17, §18,
+§21):
 
-`ez_strsep` closed during this pass (§18): TER was sinking `q + 1` past the
-NUL store and `auto-inc-dec` was folding the pair into a post-increment.
+| | mechanism | closed by |
+|---|---|---|
+| `ez_strsep` | TER sank `q + 1` past the NUL store and `auto-inc-dec` folded the pair into a post-increment | a TER-opaque store |
+| `ez_new_sc_ioctl` | IRA's colouring order is `ALLOCNO_FREQ`, i.e. 1000 × the RTL reference count at `-Os`; `rq` had three references and `is_null` two | two empty `asm`s on `is_null` |
+| `process_config_vars`, `m` | `tree-ssa-dom.c`'s `record_edge_info` boolean special case folds the loop PHI's argument to 1 and the cstore dies | `_Bool m` + `(end == 0) & (m & 1)` |
+| `process_config_vars`, `pos` | seven per-edge `pos = 0` copies let out-of-SSA coalesce the guard temp into pos's partition, and `reorder_basic_blocks_simple` then gave the loop tail to the wrong predecessor | one shared `pos = 0` in a block kept alive by an `asm` that uses it |
 
-Everything else is byte-identical: `.rodata`, `.rodata.str1.1`, `.data`,
-`.bss`, `.symtab`, `.strtab`, `.modinfo`, `.comment`, all twelve relocation
-sections and all four exidx sections — 39 of 41. Every function symbol is at
-the shipped address with the shipped size.
+Two more register assignments in `process_config_vars` (`end` over `j`, the
+guard temp over `buf`) were the same reference-count rule as
+`ez_new_sc_ioctl` and needed the same device.
 
 ### The two-count trap, twice
 
@@ -173,6 +174,32 @@ symbol, is the check that finds that (`FINDINGS-oem-catalogue.md` §20).
     fold and leaves the others, which is how TER and `auto_inc_dec` were
     separated in `ez_strsep` instead of being argued about. Register
     allocation has no such counter — `grep dbg_cnt ira-*.c` is empty. §18
+14. **`reorder_basic_blocks_simple` is first-come-first-served in block-chain
+    order.** At `-Os` it does not sort at all: it walks `FOR_EACH_BB_FN`,
+    collects each block's single-successor edge (or a condjump's fallthrough
+    and taken edges, fallthrough first), and makes each one a fallthrough if
+    both ends are still free chain endpoints. So the loop tail goes to the
+    *first* single-successor predecessor in chain order, and the chains are
+    then emitted in the order of their start blocks. Nothing about
+    probabilities enters into it. §17
+15. **A shared tail written once does not stay one block.** `pos = 0` reached
+    by `goto` from six arms is DCE'd into the PHI argument, the block becomes
+    an empty forwarder, and `cleanup_cfg` deletes it — putting the copy back on
+    all six edges. Keeping the block needs a real *use* of the stored value.
+    §17
+16. **Cross-jumping matches a constant against a register.** `can_replace_by`
+    in `cfgcleanup.c` accepts two sets of the same destination when one source
+    is a `CONST_INT` and the other carries an equal `REG_EQUAL`, which is how a
+    `pos = n` in one arm gets merged into a shared `pos = 0`. It does not match
+    an `asm`, so the order of statements inside the shared block decides
+    whether the merge happens. §17
+17. **DOM folds a boolean-ranged branch operand into successor PHIs.**
+    `record_edge_info` records `x == 1` on the true edge of `if (x != 0)`
+    whenever `ssa_name_has_boolean_range (x)` — which is true for an `int`
+    whose nonzero bits are 1 — and `cprop_into_successor_phis` deliberately
+    applies edge equivalences to PHIs in *non-dominated* blocks. That is what
+    kills a materialised 0/1 flag; the decision is keyed on the PHI's type, so
+    `_Bool` escapes it and no `int` spelling does. §17
 
 Each work package is done by one agent, which writes a markdown report into the
 repo and commits it, so this file plus those reports are the full record.
