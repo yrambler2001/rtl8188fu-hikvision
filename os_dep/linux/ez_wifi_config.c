@@ -513,10 +513,11 @@ int ez_hexval(char c)
 	return 0;
 }
 
-/* ez_read_rssi_per_ant_ioctl -> ez_get_mac_addr: 6 declarations */
+/* ez_read_rssi_per_ant_ioctl -> ez_get_mac_addr: 6 declarations, one of
+ * which is spent on ez_strsep's `r' below. */
 enum ez_wifi_uid_gap_3 {
 	EZ_WIFI_UID_GAP_3_0, EZ_WIFI_UID_GAP_3_1, EZ_WIFI_UID_GAP_3_2,
-	EZ_WIFI_UID_GAP_3_3, EZ_WIFI_UID_GAP_3_4
+	EZ_WIFI_UID_GAP_3_3
 };
 
 int ez_atox(char *s)
@@ -535,7 +536,7 @@ int ez_atox(char *s)
 char *ez_strsep(char **stringp, char delim, char esc)
 {
 	char *s = *stringp;
-	char *p, *q;
+	char *p, *q, *r;
 	char c;
 
 	if (s == NULL)
@@ -565,8 +566,20 @@ char *ez_strsep(char **stringp, char delim, char esc)
 			}
 		}
 		if (c == delim) {
+			/*
+			 * The rest-pointer is computed *before* the NUL store
+			 * and stored through a TER-opaque lvalue.  GCC 6.5.0's
+			 * tree-ssa-ter.c would otherwise sink `q + 1' to its
+			 * single use - past `*q = 0' - and auto-inc-dec's
+			 * backwards scan would fold the pair into
+			 * `strb rX, [q], #1', which leaves the pointer in q's
+			 * own register and stops cross-jumping merging this
+			 * store with the end-of-string one.  See
+			 * FINDINGS-oem-catalogue.md section 18.
+			 */
+			r = q + 1;
 			*q = '\0';
-			*stringp = q + 1;
+			*(char * volatile *)stringp = r;
 			return s;
 		}
 		p = q + 1;
