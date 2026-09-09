@@ -15,11 +15,11 @@ rm -rf cleanchk
 git archive HEAD --prefix=cleanchk/ | tar -x
 
 echo "== building"
-docker exec -e SRC=/src/cleanchk "$CONTAINER" sh /src/build/build-vendorpath.sh >/dev/null
+docker exec -e SRC=/src/cleanchk "$CONTAINER" sh /src/build/build-vendorpath.sh >/dev/null 2>&1
 
 echo "== determinism: rebuilding"
 cp cleanchk/8188fu.ko /tmp/verify-first.ko
-docker exec -e SRC=/src/cleanchk "$CONTAINER" sh /src/build/build-vendorpath.sh >/dev/null
+docker exec -e SRC=/src/cleanchk "$CONTAINER" sh /src/build/build-vendorpath.sh >/dev/null 2>&1
 cmp /tmp/verify-first.ko cleanchk/8188fu.ko && echo "   build is deterministic"
 
 echo "== scoreboard"
@@ -30,3 +30,5 @@ shasum -a 256 "$SHIPPED" cleanchk/8188fu.ko 2>/dev/null || sha256sum "$SHIPPED" 
 
 echo "== cmp"
 cmp "$SHIPPED" cleanchk/8188fu.ko && echo "   IDENTICAL" || echo "   (see the scoreboard above)"
+
+rm -rf cleanchk
