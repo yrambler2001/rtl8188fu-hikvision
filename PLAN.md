@@ -1,74 +1,93 @@
 # Plan: byte-exact reproduction of the shipped `8188fu.ko`
 
 Reference: `/path/to/8188fu.ko`, 1,918,056 bytes,
-3939 functions / 975,404 bytes of `.text`.
+SHA-256 `a7fcfe277c77d9e497104fd5cc12f62ccd3df851b0ff3292b035444f5d78bb13`,
+3,939 symbols / 975,780 bytes of `.text`.
 
-Measurement:
+## Measurement
 
-* `build/fulldiff.py <shipped> <rebuilt>` - whole-file scoreboard, every section, the
-  symbol table, the relocations and the string tables. Current: **972 bytes still
-  differ (0.051% of the file)**, and **34 of 41 sections are byte-identical**; see
-  `FINDINGS-oem-catalogue.md`, `FINDINGS-byte-gap.md` and `FINDINGS-toolchain.md`.
-* `build/offsetdiff.py <shipped> <rebuilt>` - per-instruction operand diff of `.text`.
-* `build/oem/run.sh`, `build/oem/pub.sh` - the WP-D loop: compile only the two OEM
-  translation units, or one public file, and score each function against the shipped
-  module in seconds.
+* `build/fulldiff.py <shipped> <rebuilt> [--brief]` — whole-file scoreboard:
+  every section, the symbol table, the relocations and the string tables.
+  Current: **455 bytes still differ (0.024% of the file)**.
+  *Caveat:* it strips GCC's `.NNNN` uniquifiers before comparing `.strtab`, so
+  a `.strtab` scored 0 is not necessarily byte-identical. Use
+  `build/oem/uidfn.sh` for that.
+* `build/offsetdiff.py <shipped> <rebuilt> [--fn NAME]` — per-instruction
+  operand diff of `.text`.
+* `build/oem/run.sh [--fn NAME] [-v] [--score]` — the per-function loop: compile
+  only the two OEM translation units and score all 46 functions in about a
+  second. `--score` prints `n=<differing words>,d=<size delta>`.
+* `build/oem/pub.sh <file.c> <fn> [-v]` — the same for one public file.
+* `build/oem/uidfn.sh <file.c>` — the `__func__.NNNN` DECL_UID uniquifiers.
+* `build/oem/dump.sh <unit> <gcc dump flags>` — GCC's own RTL/GIMPLE dumps.
 
 ## Barriers
 
 | # | barrier | status |
 |---|---|---|
-| 1 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) are not in the Realtek tarball | **reconstructed** - 37/46 byte-identical, see `FINDINGS-oem-catalogue.md` |
-| 2 | vendor compiler | **solved** - stock GCC 6.5.0 (kernel.org crosstool) matches |
-| 3 | vendor kernel tree + `.config` (Fullhan FH865X, Linux 4.9.129) | **solved** - see `FINDINGS-vendor-kernel.md` |
-| 4 | build path `/data1/jiangqifeng6/...` baked into `.rodata` by `__FILE__` | **solved** - see `FINDINGS-byte-gap.md` |
-| 5 | driver `#ifdef` configuration | **solved** - see `FINDINGS-driver-config.md` |
-| 6 | GCC's `--with-pkgversion` string, 159 copies in `.comment` | **solved** - see `FINDINGS-toolchain.md` |
+| 1 | vendor compiler (`.comment` says `arm_multilib_uclibc_20200924`) | **solved** — stock GCC 6.5.0 rebuilt with that `--with-pkgversion`; `FINDINGS-toolchain.md` |
+| 2 | vendor kernel tree + `.config` (Fullhan FH865X, Linux 4.9.129) | **solved** — `FINDINGS-vendor-kernel.md` |
+| 3 | driver `#ifdef` configuration | **solved** — `FINDINGS-driver-config.md` |
+| 4 | build path in `.rodata` via `__FILE__`, and `__DATE__`/`__TIME__` | **solved** — `FINDINGS-byte-gap.md` §3 |
+| 5 | OEM sources `ez_sc.c` / `ez_wifi_config.c` (46 functions) | **reconstructed** — 42/46 byte-identical; `FINDINGS-oem-catalogue.md` |
+| 6 | `DECL_UID` uniquifiers in `.symtab`/`.strtab` | **863/879 symbols** — `FINDINGS-oem-catalogue.md` §11 |
 
 ## Work packages
 
-- **WP-A** find the Fullhan FH865X Linux 4.9.129 tree and/or its defconfig *(done)*
-- **WP-B** recover the kernel `.config` from the binary using the offset oracle *(done)*:
-  the Fullhan BSP's `fh8856v200_defconfig`, retargeted from `CPU_V6` to `CPU_V7`, hits all
-  three oracle targets and clears every kernel-header family out of the offset histogram.
-- **WP-C** driver `#ifdef` configuration *(done - `FINDINGS-driver-config.md`)*. The +1312
-  growth of `struct mlme_priv` is `CONFIG_APPEND_VENDOR_IE_ENABLE`. Four more flags came
-  out of the symbol-set diff: `CONFIG_POWER_SAVING = n`, `CONFIG_TXPWR_LIMIT_EN = y`,
-  `CONFIG_AUTO_NOTCH_FILTER = y`, and `CONFIG_PLATFORM_OPS` must *not* be defined; plus
-  `REALTEK_CONFIG_PATH = "/dav/"`. 65.2% -> 98.6%, and the offset histogram is now empty.
-- **WP-E** build under the original path *(done - `FINDINGS-byte-gap.md` section 3)*.
-  `build/build-vendorpath.sh` builds from
-  `/data1/jiangqifeng6/work/tongyibianyi/develop_branch/wifi/rtl8188FU_linux_v5.15.3-6-g1a2e952f9.20230217`
-  and pins `__DATE__`/`__TIME__` to `Dec 25 2023` / `20:43:27`. Every string our build
-  emits is now present in the shipped module; zero path-like differences remain.
-- **WP-D** reconstruct `ez_sc.c` / `ez_wifi_config.c` *(done - `FINDINGS-oem-catalogue.md`)*.
-  The two file names came out of the shipped `STT_FILE` symbols; their symbol grouping
-  gave each file's `.text`/`.rodata`/`.data`/`.bss` ranges and so the 18/28 function
-  split. Both files, their nine `.bss` and eight `.data` objects, all 115 strings, and
-  the four public call sites (`rtw_ioctl`, `OnProbeReq`, `OnProbeRsp`,
-  `rtw_usb_primary_adapter_init`) are reconstructed and wired in behind `CONFIG_EZ_WIFI`.
-  **28,368 -> 972 bytes**; `.rodata.str1.1`, `.rodata`, `.data`, `.bss`, `.comment`,
-  `.strtab`, `.ARM.exidx` and eleven of twelve relocation sections are now
-  byte-identical, and `.symtab` has the right size and no missing or extra symbol. Nine
-  OEM functions still differ, all by register allocation or block ordering; the
-  catalogue lists each one and what is known about it.
-- **WP-F** build GCC 6.5.0 with `--with-pkgversion='arm_multilib_uclibc_20200924'`
-  *(done - `FINDINGS-toolchain.md`)*. `build/build-gcc-vendor.sh` rebuilds it from the FSF
-  tarball with the kernel.org crosstool's own configure options plus that one string; no
-  patches were needed. `.comment` went 9,347 -> **84** bytes (exactly the two OEM object
-  files), the whole file 37,630 -> **28,368**, and codegen is untouched: all **158 object
-  files are byte-identical** to the stock compiler's once `.comment` is removed, and
-  `offsetdiff.py` still reports 3882/3939.
+- **WP-A** find the Fullhan FH865X Linux 4.9.129 tree / defconfig *(done)*
+- **WP-B** recover the kernel `.config` from the binary *(done)* — the BSP's
+  `fh8856v200_defconfig`, retargeted `CPU_V6` → `CPU_V7`
+- **WP-C** driver `#ifdef` configuration *(done — `FINDINGS-driver-config.md`)*
+- **WP-D** reconstruct `ez_sc.c` / `ez_wifi_config.c` *(done —
+  `FINDINGS-oem-catalogue.md`)*: 28,368 → 455 bytes
+- **WP-E** build under the original path *(done — `FINDINGS-byte-gap.md` §3)*
+- **WP-F** GCC 6.5.0 with `--with-pkgversion='arm_multilib_uclibc_20200924'`
+  *(done — `FINDINGS-toolchain.md`)*: `.comment` 9,347 → 0 bytes, and all 158
+  object files byte-identical to the stock compiler's once `.comment` is removed
+- **WP-G** the `__func__.NNNN` DECL_UID uniquifiers *(done, 863/879 —
+  `FINDINGS-oem-catalogue.md` §11)*: the vendor's OEM header carried types and
+  extern objects but not prototypes; splitting `include/ez_wifi.h` into
+  `ez_wifi.h` + `ez_wifi_fn.h` took the mismatch from 726 symbols to 16
 
 ## Residuals
 
-`_rtw_skb_alloc` (92 bytes) is **closed**: `FINDINGS-byte-gap.md` section 4.1's
-reconstruction is correct, and it settles that note's open question in favour of an OEM
-patch to `os_dep/osdep_service.c` rather than a patched `skbuff.h` - the same source
-compiled against the same unmodified vendor headers reproduces the shipped function.
-`rtw_sptime_get` is also closed; its 4-byte difference was the literal-pool alignment
-`nop` section 4.3 predicted, and it disappeared once the OEM code moved the function.
-`rtw_efuse_analyze` (4 bytes) remains, exactly as analysed in section 4.2.
+Four functions in `.text`, four ARM instructions in total, all of them register
+allocation with a known cause (`FINDINGS-oem-catalogue.md` §10):
 
-Each work package is done by one agent, which writes a markdown report into the repo
-and commits it, so this file plus those reports are the full record.
+| function | delta | cause |
+|---|---:|---|
+| `process_config_vars` | +8 | the shipped build spills `pick`; IRA has 12 restricted allocnos to our 11 because our `n` does not cross the calls |
+| `ez_scan_device_ioctl_handle` | +4 | `&probe_req_t` derived from the `.bss` section anchor rather than the literal pool |
+| `ez_strsep` | 80 bytes, right size | one if-conversion, one loop-carried register |
+| `ez_new_sc_ioctl` | 20 bytes, right size | a two-allocno tie IRA breaks the other way |
+
+Plus 16 `__func__` uniquifiers in the two OEM files: the gap arithmetic in
+`FINDINGS-oem-catalogue.md` §11 says the vendor's OEM sources declare 65 more
+locals than ours. Those emit no code (the kernel builds with
+`-Wno-unused-variable`), so the binary records their count and nothing else.
+They are left as a measured residual rather than invented.
+
+`.note.gnu.build-id` is an SHA-1 over the linked output and converges last.
+
+## Closed in the last pass
+
+`ez_device_info_ioctl_handle`, `ez_mac2u8`, `ez_wifi_func_poll_ioctl_handle`,
+`ez_probe_requst_eid208_handler`, `ez_set_new_sc` and `rtw_efuse_analyze` all
+became byte-identical; `process_config_vars` went +24 → +8 and
+`ez_scan_device_ioctl_handle` +12 → +4. Three general rules came out of it and
+are written up in `FINDINGS-oem-catalogue.md` §12–14:
+
+1. **Block layout at `-Os` is source order.** GCC 6's
+   `reorder_basic_blocks_simple` skips its edge sort entirely when optimising
+   for size, so branch probabilities — including the very strong
+   `PRED_COLD_FUNCTION` the kernel's `__cold` `printk` puts on every error path
+   — are computed and then ignored.
+2. **`uncprop` is type-sensitive.** It rewrites constants in PHI arguments into
+   SSA names known to hold that constant, including a `switch` index on a
+   single-valued case edge — but only when the types match. One `u32` that
+   should have been `int` cost `ez_set_new_sc` 12 bytes.
+3. **The `__func__.NNNN` uniquifiers are a declaration-count oracle**, and they
+   also fix source order, which `.text` order cannot.
+
+Each work package is done by one agent, which writes a markdown report into the
+repo and commits it, so this file plus those reports are the full record.
