@@ -1518,3 +1518,46 @@ Two further routes are closed by mechanism rather than by sweeping:
   `-Os`.  A reference in the cold error arm and a reference on the hot path
   contribute identically, so `unlikely()` / `__builtin_expect` cannot move this
   tie at all - not "not enough", but not at all.
+
+---
+
+## 22. Harness audit: every masked field, and the check that covers it
+
+A comparison harness that masks a field is a harness that cannot report it.
+Section 20 cost this reconstruction 1,280 bytes for exactly that reason, so
+here is the complete list of what each tool hides and what catches it instead.
+
+| tool | what it masks | covered by |
+|---|---|---|
+| `fulldiff.py` structural count | charges a wrong-sized function only its size *delta* and never looks inside it; a function that moved but kept its name and size is charged **nothing** | the **RAW** count in the same run - a plain positional compare of the whole file, headers included - and the per-section `byte-identical sections: N/41` line |
+| `fulldiff.py` `.symtab` / `.strtab` name comparison | strips GCC's `.NNNN` `DECL_UID` uniquifier before comparing, so renumbered locals score 0 | the RAW count (which compares `.strtab` byte for byte) and `build/oem/uidgap.py`, which pairs every `.NNNN` symbol by section and address and prints the per-interval declaration deficit |
+| `fulldiff.py` `reloc` and `branch` counters | relocation addends and `B`/`BL` displacements are reported but excluded from the structural `total` | printed on their own summary line every run, and included in RAW |
+| `oemdiff.py` | compares an *object* to the *linked* module, so every word under a relocation is compared symbolically (target symbol, addend, string contents) and every `B`/`BL` by its resolved callee; a function at the wrong address scores clean | the RAW count, and `fulldiff.py`'s per-symbol `st_value` check - every one of the 3,909 symbols is required to be at the shipped address |
+| `align.py` `s` score | blanks the register fields, so a function that differs only in allocation scores 0 | the `n` count (differing 4-byte words) printed beside it, and RAW |
+| `lab.py` | reports `n`, `d` and `s` from the two above | same |
+
+Two structural properties make the list closed rather than merely long:
+
+* **Nothing is compared only per symbol.**  `fulldiff.py` walks all 41
+  sections and compares each in full, and prints `bytes outside any sized
+  symbol` for every one of them, unconditionally and untruncated - the byte
+  counts are equal on both sides in every section, so no byte of the file is
+  unattributed.
+* **RAW is a compare of the whole file**, not a sum of per-object verdicts, so
+  anything the symbolic tools mask still lands in it.
+
+### The check was tested by breaking it again
+
+Reverting only the section-20 fix - moving `ez_probe_req_handler` back after
+`check_probe_sync_eid208` - and rebuilding gives:
+
+```
+  oemdiff.py (per function, symbolic)   44/46 byte-identical, 8336/8736 bytes   <- unchanged
+  fulldiff.py STRUCTURAL                192 bytes                               <- unchanged
+  fulldiff.py RAW                       116 -> 519 bytes                        <- fires
+  byte-identical sections                39 -> 34                               <- fires
+```
+
+Both symbolic verdicts are blind to it and both positional ones catch it.  That
+is the reason **RAW is the headline number** everywhere in this repository, and
+the reason the section count is printed next to it.
